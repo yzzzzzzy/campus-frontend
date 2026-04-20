@@ -391,6 +391,55 @@ app.put('/api/user/info', authenticateToken, async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
+// 👉 [新增] 15. 收藏 / 取消收藏 (需要保安验证)
+app.post('/api/favorites/toggle', authenticateToken, async (req, res) => {
+    try {
+        const { target_id, target_type = 'post' } = req.body;
+        const user_id = req.user.id;
+
+        // 检查数据库里是否已经有这条收藏记录
+        const [existing] = await db.query(
+            'SELECT id FROM favorites WHERE user_id = ? AND target_id = ? AND target_type = ?',
+            [user_id, target_id, target_type]
+        );
+
+        if (existing.length > 0) {
+            // 查到了 -> 说明已经收藏过了 -> 执行取消收藏
+            await db.query('DELETE FROM favorites WHERE id = ?', [existing[0].id]);
+            res.send({ code: 200, message: '已取消收藏' });
+        } else {
+            // 没查到 -> 执行添加收藏
+            await db.query(
+                'INSERT INTO favorites (user_id, target_id, target_type) VALUES (?, ?, ?)',
+                [user_id, target_id, target_type]
+            );
+            res.send({ code: 200, message: '收藏成功！' });
+        }
+    } catch (error) {
+        console.error('收藏操作失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 16. 获取我的收藏列表 (目前先联表查询 posts 帖子)
+app.get('/api/user/favorites', authenticateToken, async (req, res) => {
+    try {
+        // 利用 JOIN 把收藏表和帖子表连起来查
+        const query = `
+            SELECT p.id, p.title, p.content, p.created_at, c.name AS category_name, f.created_at as favorited_at
+            FROM favorites f
+            JOIN posts p ON f.target_id = p.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE f.user_id = ? AND f.target_type = 'post'
+            ORDER BY f.created_at DESC
+        `;
+        const [rows] = await db.query(query, [req.user.id]);
+        res.send({ code: 200, message: '获取收藏成功', data: rows });
+    } catch (error) {
+        console.error('获取收藏列表失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

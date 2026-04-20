@@ -45,7 +45,22 @@
                 </el-tab-pane>
 
                 <el-tab-pane label="⭐ 我的收藏" name="favorites">
-                  <el-empty description="收藏功能开发中..." />
+                  <el-empty v-if="myFavorites.length === 0" description="你的收藏夹空空如也~" />
+                  
+                  <div v-for="item in myFavorites" :key="item.id" class="my-post-item">
+                    <div class="post-header">
+                      <h4>{{ item.title }}</h4>
+                      <el-tag type="warning" size="small">{{ item.category_name }}</el-tag>
+                    </div>
+                    <p class="post-content">{{ item.content }}</p>
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                      <span class="post-time">收藏于: {{ new Date(item.favorited_at).toLocaleString() }}</span>
+                      <el-button type="danger" link icon="Delete" @click="handleUnfavorite(item.id)">
+                        取消收藏
+                      </el-button>
+                    </div>
+                  </div>
                 </el-tab-pane>
 
                 <el-tab-pane label="⚙️ 个人设置" name="settings">
@@ -88,6 +103,7 @@ import { ElMessage } from 'element-plus'
 
 const userInfo = ref({})
 const myPosts = ref([])
+const myFavorites = ref([]) // 👉 [新增] 我的收藏列表
 const activeTab = ref('posts')
 
 // 设置表单的数据
@@ -147,10 +163,40 @@ const handleLogout = () => {
   localStorage.removeItem('token')
   router.push('/login')
 }
+// 👉 [新增] 获取我的收藏
+const fetchMyFavorites = async () => {
+  try {
+    const res = await request.get('/api/user/favorites')
+    if (res.data.code === 200) {
+      myFavorites.value = res.data.data
+    }
+  } catch (error) {
+    ElMessage.error('获取收藏失败')
+  }
+}
+// 👉 [新增] 在个人中心取消收藏
+const handleUnfavorite = async (postId) => {
+  try {
+    // 调用我们之前写好的万能 toggle 接口
+    const res = await request.post('/api/favorites/toggle', {
+      target_id: postId,
+      target_type: 'post'
+    })
+    
+    if (res.data.code === 200) {
+      ElMessage.success('已移出收藏夹')
+      // 👉 核心体验优化：不需要刷新网页，直接用 JS 把这条数据从数组里剔除掉！
+      myFavorites.value = myFavorites.value.filter(item => item.id !== postId)
+    }
+  } catch (error) {
+    ElMessage.error('操作失败')
+  }
+}
 
 onMounted(() => {
   fetchUserInfo()
   fetchMyPosts()
+  fetchMyFavorites()
 })
 </script>
 

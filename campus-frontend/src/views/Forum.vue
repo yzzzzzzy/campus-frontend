@@ -28,6 +28,16 @@
             <span>作者: {{ post.author_name }} | 标签: {{ post.tags || '无' }}</span>
             <div class="footer-actions">
               <span class="time-text">发布时间: {{ new Date(post.created_at).toLocaleString() }}</span>
+              <el-tooltip :content="post.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
+                <el-button 
+                  :type="post.is_favorited ? 'warning' : 'info'" 
+                  link 
+                  :icon="post.is_favorited ? 'StarFilled' : 'Star'" 
+                  @click="handleFavorite(post)" 
+                  style="font-size: 18px;" 
+                />
+              </el-tooltip>
+              
               <el-button type="primary" link icon="ChatDotRound" @click="toggleComments(post)">
                 {{ post.showComments ? '收起评论' : '查看评论' }}
               </el-button>
@@ -96,13 +106,33 @@ const dialogVisible = ref(false)
 const searchQuery = ref('')
 const selectedCategory = ref('')
 const postForm = ref({ title: '', category_id: '', tags: '', content: '' })
+const myFavoriteIds = ref([]) // 用来存当前用户收藏过的帖子 ID
+
+// 👉 [新增] 获取用户所有的收藏记录 ID
+const fetchMyFavorites = async () => {
+  try {
+    const res = await request.get('/api/user/favorites')
+    if (res.data.code === 200) {
+      // 把查到的收藏帖子的 ID 提取出来存进数组
+      myFavoriteIds.value = res.data.data.map(item => item.id)
+    }
+  } catch (error) {
+    console.error('获取收藏列表失败')
+  }
+}
 
 const fetchPosts = async () => {
   try {
     const res = await request.get('/api/posts', {
       params: { keyword: searchQuery.value, categoryId: selectedCategory.value }
     })
-    if (res.data.code === 200) postList.value = res.data.data
+    if (res.data.code === 200) {
+      // 👉 [重点修改] 遍历帖子，打上是否被收藏的标签
+      postList.value = res.data.data.map(post => ({
+        ...post,
+        is_favorited: myFavoriteIds.value.includes(post.id)
+      }))
+    }
   } catch (error) { console.error('获取帖子失败') }
 }
 
@@ -153,7 +183,25 @@ const submitComment = async (post) => {
   } catch (error) { ElMessage.error('评论失败') }
 }
 
+// 👉 [新增] 处理收藏逻辑
+const handleFavorite = async (post) => {
+  try {
+    const res = await request.post('/api/favorites/toggle', {
+      target_id: post.id,
+      target_type: 'post'
+    })
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message)
+      // 👉 [重点修改] 手动切换前端状态，让星星立刻变色！
+      post.is_favorited = !post.is_favorited
+    }
+  } catch (error) {
+    ElMessage.error('操作失败，请检查是否登录')
+  }
+}
+
 onMounted(() => {
+  fetchMyFavorites()
   fetchPosts()
   fetchCategories()
 })
