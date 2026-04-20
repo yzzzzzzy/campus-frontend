@@ -6,7 +6,7 @@
       <slot></slot>
 
       <el-dropdown v-if="showDropdown" trigger="hover" @command="handleCommand" class="avatar-dropdown">
-        <div class="avatar-wrapper">
+        <div class="avatar-wrapper" @click="router.push('/profile')">
           <el-avatar :size="40" :src="userInfo.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
         </div>
         
