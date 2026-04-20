@@ -1,0 +1,401 @@
+const express = require('express');
+const cors = require('cors');
+const bcrypt = require('bcryptjs'); // 引入加密工具
+const jwt = require('jsonwebtoken'); // 引入 Token 工具
+require('dotenv').config();
+
+// 👉 [新增] 引入我们刚刚写好的数据库连接文件
+const db = require('./db');
+const authenticateToken = require('./auth'); // 引入保安
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// 原来的基础测试接口
+app.get('/', (req, res) => {
+    res.send({
+        code: 200,
+        message: '欢迎来到大学生信息共享平台！后端服务已成功启动！🎉'
+    });
+});
+
+// 👉 [新增] 第一个真实业务接口：获取所有板块分类
+// 当浏览器访问 /api/categories 时，触发这个函数
+app.get('/api/categories', async (req, res) => {
+    try {
+        // 去数据库的 categories 表里查询所有数据，并按 sort_order 排序
+        const [rows] = await db.query('SELECT * FROM categories ORDER BY sort_order ASC');
+
+        // 把查到的数据打包成 JSON 发给前端
+        res.send({
+            code: 200,
+            message: '获取板块分类成功',
+            data: rows
+        });
+    } catch (error) {
+        console.error('查询数据库时发生错误:', error);
+        res.status(500).send({
+            code: 500,
+            message: '服务器内部错误'
+        });
+    }
+});
+
+// 👉 [新增] 1. 用户注册接口 (POST请求)
+app.post('/api/register', async (req, res) => {
+    try {
+        // 1. 获取前端传过来的账号、密码、昵称等信息
+        const { username, password, nickname, major, skills } = req.body;
+
+        // 2. 检查账号是否已经存在
+        const [existingUsers] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        if (existingUsers.length > 0) {
+            return res.send({ code: 400, message: '该学号/账号已被注册！' });
+        }
+
+        // 3. 核心考点：密码加密（加盐）
+        const salt = bcrypt.genSaltSync(10);
+        const hashedPassword = bcrypt.hashSync(password, salt);
+
+        // 4. 将新用户存入数据库 (注意这里存的是加密后的密码)
+        await db.query(
+            'INSERT INTO users (username, password, nickname, major, skills) VALUES (?, ?, ?, ?, ?)',
+            [username, hashedPassword, nickname, major || null, skills || null]
+        );
+
+        res.send({ code: 200, message: '注册成功！欢迎加入平台！' });
+    } catch (error) {
+        console.error('注册错误:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+
+// 👉 [新增] 2. 用户登录接口 (POST请求)
+app.post('/api/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        // 1. 去数据库里找这个账号
+        const [users] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        if (users.length === 0) {
+            return res.send({ code: 400, message: '账号不存在！' });
+        }
+
+        const user = users[0];
+
+        // 2. 核心考点：校验密码（将用户输入的明文和数据库里的密文进行安全比对）
+        const isPasswordValid = bcrypt.compareSync(password, user.password);
+        if (!isPasswordValid) {
+            return res.send({ code: 400, message: '密码错误！' });
+        }
+
+        // 3. 密码正确，颁发 JWT Token (电子通行证)
+        // 注意：这里面千万不要放密码！只放 ID 和账号这种非敏感信息
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role },
+            process.env.JWT_SECRET, // 用我们在 .env 里写的密钥来盖章
+            { expiresIn: '24h' }    // Token 24小时后自动过期失效
+        );
+
+        res.send({
+            code: 200,
+            message: '登录成功！',
+            data: {
+                token: token,
+                user: {
+                    id: user.id,
+                    username: user.username,
+                    nickname: user.nickname,
+                    major: user.major,
+                    role: user.role
+                }
+            }
+        });
+    } catch (error) {
+        console.error('登录错误:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 3. 发布信息/帖子接口 (注意中间加了 authenticateToken 这个保安！)
+app.post('/api/posts', authenticateToken, async (req, res) => {
+    try {
+        // 因为保安已经验过通行证了，所以 req.user 里肯定有当前登录用户的信息
+        const userId = req.user.id;
+
+        // 获取前端填写的发帖内容
+        const { title, content, category_id, tags } = req.body;
+
+        // 简单的防呆校验，标题和内容不能为空
+        if (!title || !content || !category_id) {
+            return res.send({ code: 400, message: '标题、内容和分类都不能为空哦！' });
+        }
+
+        // 插入到 posts 数据库表中
+        const [result] = await db.query(
+            'INSERT INTO posts (title, content, user_id, category_id, tags) VALUES (?, ?, ?, ?, ?)',
+            [title, content, userId, category_id, tags || null]
+        );
+
+        res.send({
+            code: 200,
+            message: '发布成功！',
+            data: { postId: result.insertId } // 把刚刚生成的帖子ID返回给前端
+        });
+    } catch (error) {
+        console.error('发帖失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [升级版] 4. 获取帖子列表接口 (支持关键词搜索和分类筛选)
+app.get('/api/posts', async (req, res) => {
+    try {
+        // 获取前端可能传过来的搜索条件
+        const { keyword, categoryId } = req.query;
+
+        // 基础的 SQL 联查语句
+        let query = `
+            SELECT 
+                p.id, p.title, p.content, p.tags, p.view_count, p.created_at,
+                u.nickname AS author_name, u.avatar AS author_avatar,
+                c.name AS category_name
+            FROM posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE 1=1
+        `;
+
+        const queryParams = [];
+
+        // 如果前端传了板块ID，就加上板块过滤
+        if (categoryId) {
+            query += ` AND p.category_id = ?`;
+            queryParams.push(categoryId);
+        }
+
+        // 如果前端传了关键词，就加上模糊搜索 (搜标题或内容)
+        if (keyword) {
+            query += ` AND (p.title LIKE ? OR p.content LIKE ?)`;
+            const likeKeyword = `%${keyword}%`; // SQL 里的模糊匹配符号
+            queryParams.push(likeKeyword, likeKeyword);
+        }
+
+        // 最后加上按时间倒序排列
+        query += ` ORDER BY p.created_at DESC`;
+
+        const [rows] = await db.query(query, queryParams);
+
+        res.send({
+            code: 200,
+            message: '获取帖子列表成功',
+            data: rows
+        });
+    } catch (error) {
+        console.error('获取帖子失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 5. 获取当前登录用户的个人信息 (需要保安验证)
+app.get('/api/user/info', authenticateToken, async (req, res) => {
+    try {
+        // 从数据库查询当前用户的详细信息（密码除外）
+        const [users] = await db.query(
+            'SELECT id, username, nickname, major, skills, avatar, created_at FROM users WHERE id = ?',
+            [req.user.id]
+        );
+
+        if (users.length === 0) {
+            return res.send({ code: 400, message: '找不到该用户' });
+        }
+        res.send({ code: 200, message: '获取成功', data: users[0] });
+    } catch (error) {
+        console.error('获取用户信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 6. 获取当前用户自己发布的帖子 (需要保安验证)
+app.get('/api/user/posts', authenticateToken, async (req, res) => {
+    try {
+        const query = `
+            SELECT p.id, p.title, p.content, p.tags, p.created_at, c.name AS category_name
+            FROM posts p
+            LEFT JOIN categories c ON p.category_id = c.id
+            WHERE p.user_id = ?
+            ORDER BY p.created_at DESC
+        `;
+        const [rows] = await db.query(query, [req.user.id]);
+        res.send({ code: 200, message: '获取成功', data: rows });
+    } catch (error) {
+        console.error('获取我的帖子失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 7. 发表评论 (需要保安验证，必须登录才能评论)
+app.post('/api/comments', authenticateToken, async (req, res) => {
+    try {
+        const { post_id, content } = req.body;
+        if (!post_id || !content) {
+            return res.send({ code: 400, message: '评论内容不能为空！' });
+        }
+
+        // 插入评论数据
+        await db.query(
+            'INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)',
+            [post_id, req.user.id, content]
+        );
+        res.send({ code: 200, message: '评论发表成功！' });
+    } catch (error) {
+        console.error('发表评论失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 8. 获取某篇帖子的所有评论 (公开接口，大家都能看)
+app.get('/api/comments/:postId', async (req, res) => {
+    try {
+        const postId = req.params.postId;
+        // 联表查询：把评论内容和评论者的昵称、头像一起查出来
+        const query = `
+            SELECT c.id, c.content, c.created_at, u.nickname, u.avatar
+            FROM comments c
+            JOIN users u ON c.user_id = u.id
+            WHERE c.post_id = ?
+            ORDER BY c.created_at ASC
+        `;
+        const [rows] = await db.query(query, [postId]);
+
+        res.send({ code: 200, message: '获取评论成功', data: rows });
+    } catch (error) {
+        console.error('获取评论失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 9. 获取个人提升资源列表 (公开接口)
+app.get('/api/resources', async (req, res) => {
+    try {
+        // 允许前端传一个 type 过来进行分类筛选（比如只看“编程开发”）
+        const { type } = req.query;
+
+        let query = 'SELECT * FROM resources';
+        const queryParams = [];
+
+        // 如果前端传了分类，就加上 WHERE 条件
+        if (type) {
+            query += ' WHERE type = ?';
+            queryParams.push(type);
+        }
+
+        // 按照添加时间倒序排列
+        query += ' ORDER BY created_at DESC';
+
+        const [rows] = await db.query(query, queryParams);
+
+        res.send({
+            code: 200,
+            message: '获取资源成功',
+            data: rows
+        });
+    } catch (error) {
+        console.error('获取资源失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 10. 获取升学考公资料列表 (公开接口)
+app.get('/api/study', async (req, res) => {
+    try {
+        const { category } = req.query; // 允许按分类筛选
+
+        let query = 'SELECT * FROM study_materials';
+        const queryParams = [];
+
+        if (category) {
+            query += ' WHERE category = ?';
+            queryParams.push(category);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const [rows] = await db.query(query, queryParams);
+
+        res.send({ code: 200, message: '获取资料成功', data: rows });
+    } catch (error) {
+        console.error('获取升学资料失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 11. 获取竞赛组队列表 (公开接口)
+app.get('/api/competitions', async (req, res) => {
+    try {
+        const { status } = req.query; // 允许按“是否满员”筛选
+
+        let query = 'SELECT * FROM competitions';
+        const queryParams = [];
+
+        if (status) {
+            query += ' WHERE status = ?';
+            queryParams.push(status);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const [rows] = await db.query(query, queryParams);
+
+        res.send({ code: 200, message: '获取竞赛信息成功', data: rows });
+    } catch (error) {
+        console.error('获取竞赛信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 12. 获取实习与就业列表 (公开接口)
+app.get('/api/careers', async (req, res) => {
+    try {
+        const { type } = req.query; // 允许按分类筛选
+
+        let query = 'SELECT * FROM careers';
+        const queryParams = [];
+
+        if (type) {
+            query += ' WHERE type = ?';
+            queryParams.push(type);
+        }
+
+        query += ' ORDER BY created_at DESC';
+
+        const [rows] = await db.query(query, queryParams);
+
+        res.send({ code: 200, message: '获取就业信息成功', data: rows });
+    } catch (error) {
+        console.error('获取就业信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 14. 修改个人资料 (昵称、头像)
+app.put('/api/user/info', authenticateToken, async (req, res) => {
+    try {
+        const { nickname, avatar } = req.body;
+
+        // 更新当前登录用户的资料
+        await db.query(
+            'UPDATE users SET nickname = ?, avatar = ? WHERE id = ?',
+            [nickname, avatar, req.user.id]
+        );
+
+        res.send({ code: 200, message: '个人资料更新成功！' });
+    } catch (error) {
+        console.error('更新资料失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`----------------------------------------`);
+    console.log(`🚀 后端服务已启动!`);
+    console.log(`👉 请在浏览器访问: http://localhost:${PORT}`);
+    console.log(`----------------------------------------`);
+});

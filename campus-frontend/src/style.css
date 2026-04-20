@@ -1,0 +1,14 @@
+html,
+body,
+#app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background-color: #f5f7fa;
+  /* 设置一个温柔的高级灰背景色 */
+}
+
+/* 👉 [新增] 强制所有页面的大容器采用垂直排列 (上下结构) */
+.common-layout>.el-container {
+  flex-direction: column !important;
+}
