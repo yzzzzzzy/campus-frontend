@@ -21,7 +21,7 @@
                   <div class="stat-label">发帖数</div>
                 </div>
                 <div class="stat-item">
-                  <div class="stat-num">0</div>
+                  <div class="stat-num">{{ userStats.totalLikes }}</div>
                   <div class="stat-label">获赞数</div>
                 </div>
               </div>
@@ -34,13 +34,20 @@
                 
                 <el-tab-pane label="📝 我的发布" name="posts">
                   <el-empty v-if="myPosts.length === 0" description="你还没有发布过帖子哦~" />
+                  
                   <div v-for="post in myPosts" :key="post.id" class="my-post-item">
                     <div class="post-header">
                       <h4>{{ post.title }}</h4>
                       <el-tag type="success" size="small">{{ post.category_name }}</el-tag>
                     </div>
                     <p class="post-content">{{ post.content }}</p>
-                    <span class="post-time">{{ new Date(post.created_at).toLocaleString() }}</span>
+                    
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                      <span class="post-time">发布于: {{ new Date(post.created_at).toLocaleString() }}</span>
+                      <el-button type="danger" link icon="Delete" @click="handleDeletePost(post.id)">
+                        删除帖子
+                      </el-button>
+                    </div>
                   </div>
                 </el-tab-pane>
 
@@ -99,12 +106,25 @@
 import { ref, onMounted } from 'vue'
 import request from '../utils/request'
 import NavBar from '../components/NavBar.vue' // 👉 引入通用导航栏组件
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const userInfo = ref({})
 const myPosts = ref([])
 const myFavorites = ref([]) // 👉 [新增] 我的收藏列表
 const activeTab = ref('posts')
+const userStats = ref({ totalLikes: 0 }) // 👉 [新增] 存放统计数据
+
+// 👉 [新增] 拉取获赞统计
+const fetchUserStats = async () => {
+  try {
+    const res = await request.get('/api/user/stats')
+    if (res.data.code === 200) {
+      userStats.value.totalLikes = res.data.data.totalLikes
+    }
+  } catch (error) {}
+}
+
+// 记得在 onMounted 里调用 fetchUserStats()
 
 // 设置表单的数据
 const settingsForm = ref({
@@ -192,11 +212,47 @@ const handleUnfavorite = async (postId) => {
     ElMessage.error('操作失败')
   }
 }
+// 👉 [新增] 安全删除我的帖子
+const handleDeletePost = async (postId) => {
+  try {
+    // 1. 弹出二次确认框，防止手抖误删
+    await ElMessageBox.confirm(
+      '确定要永久删除这篇帖子吗？相关的评论和收藏也会被一并清空哦！',
+      '⚠️ 删除确认',
+      {
+        confirmButtonText: '残忍删除',
+        cancelButtonText: '手滑了',
+        type: 'warning',
+      }
+    )
+
+    // 2. 如果用户点了“残忍删除”，就会执行下面的发请求逻辑
+    const res = await request.delete(`/api/posts/${postId}`)
+    
+    if (res.data.code === 200) {
+      ElMessage.success('帖子已彻底删除')
+      
+      // 3. 无感移除：直接用 JS 从数组里剔除这篇帖子
+      myPosts.value = myPosts.value.filter(post => post.id !== postId)
+      
+      // 注意：左侧个人名片里的“发帖数”绑定的是 myPosts.length，
+      // 所以你从数组剔除后，左边卡片上的数字也会自动减 1，极其丝滑！
+    } else {
+      ElMessage.error(res.data.message)
+    }
+  } catch (error) {
+    // 如果用户点了“手滑了”取消操作，或者关掉弹窗，会走到这里，我们什么都不用做
+    if (error !== 'cancel') {
+      ElMessage.error('网络请求失败')
+    }
+  }
+}
 
 onMounted(() => {
   fetchUserInfo()
   fetchMyPosts()
   fetchMyFavorites()
+  fetchUserStats()
 })
 </script>
 

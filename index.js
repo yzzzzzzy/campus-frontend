@@ -159,13 +159,11 @@ app.get('/api/posts', async (req, res) => {
 
         // 基础的 SQL 联查语句
         let query = `
-            SELECT 
-                p.id, p.title, p.content, p.tags, p.view_count, p.created_at,
-                u.nickname AS author_name, u.avatar AS author_avatar,
-                c.name AS category_name
+            SELECT p.*, c.name AS category_name, u.nickname AS author_name,
+            (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes_count 
             FROM posts p
-            LEFT JOIN users u ON p.user_id = u.id
             LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN users u ON p.user_id = u.id  
             WHERE 1=1
         `;
 
@@ -439,6 +437,75 @@ app.get('/api/user/favorites', authenticateToken, async (req, res) => {
         console.error('获取收藏列表失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
+});
+// 👉 [新增] 17. 删除自己发布的帖子 (需要保安验证)
+app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
+    try {
+        const postId = req.params.id;
+        const userId = req.user.id;
+
+        // 1. 安全校验：先查一下这篇帖子是不是当前登录用户发的
+        const [posts] = await db.query('SELECT user_id FROM posts WHERE id = ?', [postId]);
+
+        if (posts.length === 0) {
+            return res.send({ code: 404, message: '帖子不存在' });
+        }
+        if (posts[0].user_id !== userId) { // 👉 这里也要改成 user_id
+            return res.send({ code: 403, message: '你没有权限删除别人的帖子哦！' });
+        }
+
+        // 2. 级联清理：先删掉和这篇帖子相关的“收藏记录”和“评论记录”（防止数据库报错）
+        await db.query(`DELETE FROM favorites WHERE target_type = 'post' AND target_id = ?`, [postId]);
+        await db.query(`DELETE FROM comments WHERE post_id = ?`, [postId]);
+
+        // 3. 终极销毁：最后再把帖子本体删掉
+        await db.query(`DELETE FROM posts WHERE id = ?`, [postId]);
+
+        res.send({ code: 200, message: '帖子已彻底删除' });
+    } catch (error) {
+        console.error('删除帖子失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 18. 点赞 / 取消点赞
+app.post('/api/likes/toggle', authenticateToken, async (req, res) => {
+    try {
+        const { post_id } = req.body;
+        const user_id = req.user.id;
+
+        const [existing] = await db.query('SELECT id FROM post_likes WHERE user_id = ? AND post_id = ?', [user_id, post_id]);
+
+        if (existing.length > 0) {
+            await db.query('DELETE FROM post_likes WHERE id = ?', [existing[0].id]);
+            res.send({ code: 200, message: '取消点赞', action: 'removed' });
+        } else {
+            await db.query('INSERT INTO post_likes (user_id, post_id) VALUES (?, ?)', [user_id, post_id]);
+            res.send({ code: 200, message: '点赞成功', action: 'added' });
+        }
+    } catch (error) { res.status(500).send({ code: 500, message: '服务器错误' }); }
+});
+
+// 👉 [新增] 19. 获取当前用户点过赞的帖子 ID 数组
+app.get('/api/user/likes', authenticateToken, async (req, res) => {
+    try {
+        const [rows] = await db.query('SELECT post_id FROM post_likes WHERE user_id = ?', [req.user.id]);
+        res.send({ code: 200, data: rows.map(r => r.post_id) });
+    } catch (error) { res.status(500).send({ code: 500 }); }
+});
+
+// 👉 [新增] 20. 获取个人数据面板统计 (获赞总数)
+app.get('/api/user/stats', authenticateToken, async (req, res) => {
+    try {
+        // 统计当前用户发的所有帖子，总共被别人点了多少个赞
+        const [likeRes] = await db.query(`
+            SELECT COUNT(*) AS totalLikes 
+            FROM post_likes pl 
+            JOIN posts p ON pl.post_id = p.id 
+            WHERE p.user_id = ?
+        `, [req.user.id]);
+
+        res.send({ code: 200, data: { totalLikes: likeRes[0].totalLikes } });
+    } catch (error) { res.status(500).send({ code: 500 }); }
 });
 
 const PORT = process.env.PORT || 3000;

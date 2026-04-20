@@ -28,6 +28,22 @@
             <span>作者: {{ post.author_name }} | 标签: {{ post.tags || '无' }}</span>
             <div class="footer-actions">
               <span class="time-text">发布时间: {{ new Date(post.created_at).toLocaleString() }}</span>
+              
+              <el-tooltip :content="post.is_liked ? '取消点赞' : '点赞'" placement="top">
+                <el-button 
+                  :type="post.is_liked ? 'danger' : 'info'" 
+                  link 
+                  @click="handleLike(post)" 
+                  style="font-size: 18px; margin-right: 15px;" 
+                >
+                  <el-icon size="18">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" :fill="post.is_liked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                    </svg>
+                  </el-icon>
+                </el-button>
+              </el-tooltip>
+              
               <el-tooltip :content="post.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
                 <el-button 
                   :type="post.is_favorited ? 'warning' : 'info'" 
@@ -130,7 +146,8 @@ const fetchPosts = async () => {
       // 👉 [重点修改] 遍历帖子，打上是否被收藏的标签
       postList.value = res.data.data.map(post => ({
         ...post,
-        is_favorited: myFavoriteIds.value.includes(post.id)
+        is_favorited: myFavoriteIds.value.includes(post.id),
+        is_liked: myLikedIds.value.includes(post.id),
       }))
     }
   } catch (error) { console.error('获取帖子失败') }
@@ -199,11 +216,38 @@ const handleFavorite = async (post) => {
     ElMessage.error('操作失败，请检查是否登录')
   }
 }
+const myLikedIds = ref([]) // 存用户点过赞的 ID
 
-onMounted(() => {
-  fetchMyFavorites()
-  fetchPosts()
+// 👉 [新增] 获取用户点赞记录
+const fetchMyLikes = async () => {
+  try {
+    const res = await request.get('/api/user/likes')
+    if (res.data.code === 200) myLikedIds.value = res.data.data
+  } catch (error) {}
+}
+
+// 👉 [新增] 处理点赞点击
+const handleLike = async (post) => {
+  try {
+    const res = await request.post('/api/likes/toggle', { post_id: post.id })
+    if (res.data.code === 200) {
+      // 乐观更新：前端直接修改状态和数字，不刷新网页
+      if (res.data.action === 'added') {
+        post.is_liked = true
+        post.likes_count = (post.likes_count || 0) + 1
+      } else {
+        post.is_liked = false
+        post.likes_count = Math.max(0, (post.likes_count || 1) - 1)
+      }
+    }
+  } catch (error) { ElMessage.error('点赞失败') }
+}
+
+onMounted(async () => { // 👉 关键修复：在这里加上 async
   fetchCategories()
+  await fetchMyLikes()       // 先等点赞列表拉取完
+  await fetchMyFavorites()   // 再等收藏列表拉取完
+  await fetchPosts()         // 最后再拉取帖子列表，这样状态才准！
 })
 </script>
 
