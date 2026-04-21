@@ -64,7 +64,9 @@ const handleCommand = (command) => {
   } else if (command === 'profile') {
     router.push('/profile')
   } else if (command === 'favorites') {
-    ElMessage.info('收藏功能开发中，敬请期待！')
+    // 👉 [修改] 去掉原来的 ElMessage，改成带参数跳转！
+    // 告诉个人中心：我要去 profile 页面，并且我要直接看 favorites 标签页
+    router.push({ path: '/profile', query: { tab: 'favorites' } })
   }
 }
 

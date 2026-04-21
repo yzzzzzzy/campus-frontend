@@ -127,7 +127,10 @@ import { ref, onMounted, computed } from 'vue'
 import request from '../utils/request'
 import NavBar from '../components/NavBar.vue' // 👉 引入通用导航栏组件
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
 
+const route = useRoute()
+const router = useRouter()
 const userInfo = ref({})
 const myPosts = ref([])
 const myFavorites = ref([]) // 👉 [新增] 我的收藏列表
@@ -159,9 +162,13 @@ const fetchUserInfo = async () => {
     const res = await request.get('/api/user/info')
     if (res.data.code === 200) {
       userInfo.value = res.data.data
+      
       // 把当前信息同步到设置表单里
       settingsForm.value.nickname = userInfo.value.nickname
-      settingsForm.value.avatar = userInfo.value.avatar
+      
+      // 👉 [核心修改] 故意不要把原有头像塞进表单！让它保持为空，这样默认就是灰色加号！
+      settingsForm.value.avatar = '' 
+      
       settingsForm.value.major = userInfo.value.major
     }
   } catch (error) {
@@ -322,7 +329,13 @@ onMounted(() => {
   fetchMyPosts()
   fetchMyFavorites()
   fetchUserStats()
+  
+  // 👉 [新增] 检查是不是从导航栏的“我的收藏”点进来的
+  if (route.query.tab === 'favorites') {
+    activeTab.value = 'favorites' // 直接激活收藏标签页！
+  }
 })
+
 </script>
 
 <style scoped>
@@ -384,6 +397,7 @@ onMounted(() => {
 .post-header h4 { margin: 0 0 10px 0; }
 .post-content { font-size: 14px; color: #606266; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .post-time { font-size: 12px; color: #909399; }
+/* 修改头像上传框的样式，解决点击不跟手的问题 */
 .avatar-uploader {
   border: 1px dashed #d9d9d9;
   border-radius: 6px;
@@ -394,9 +408,42 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   align-items: center;
+  
+  /* 👉 [修复1] 强制提升层级，确保不被周围其他隐形元素遮挡 */
+  position: relative;
+  z-index: 10;
+  
+  /* 👉 [修复2] 确保背景和边框的变化瞬间完成，不阻塞点击事件 */
+  transition: border-color 0.1s ease; 
 }
-.avatar-uploader:hover { border-color: #409eff; }
-.avatar-preview { width: 100px; height: 100px; object-fit: cover; }
-.avatar-uploader-icon { font-size: 28px; color: #8c939d; }
+
+.avatar-uploader:hover { 
+  border-color: #409eff; 
+}
+
+/* 👉 [修复3] 关键：防止内部元素(特别是图片)干扰点击事件 */
+/* 让鼠标点击完全穿透图片，直接点在最外层的 uploader 上 */
+:deep(.avatar-uploader .el-upload) {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.avatar-preview { 
+  width: 100px; 
+  height: 100px; 
+  object-fit: cover; 
+  /* 让图片像个幽灵一样，鼠标能穿透它点到后面的上传框 */
+  pointer-events: none; 
+}
+
+.avatar-uploader-icon { 
+  font-size: 28px; 
+  color: #8c939d; 
+  /* 同样，让加号图标也不要挡着点击事件 */
+  pointer-events: none;
+}
 
 </style>

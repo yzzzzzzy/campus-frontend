@@ -1,134 +1,267 @@
 <template>
-  <div class="login-container">
-    <el-card class="login-card" shadow="hover">
-      <h2 class="title">🎓 校园信息共享平台</h2>
+  <div class="login-page">
+    <canvas ref="particleCanvas" class="particle-canvas"></canvas>
+
+    <el-card class="login-card" shadow="never">
+      <div class="login-header">
+        <div class="logo-icon">
+          <el-icon :size="40" color="#409EFF"><School /></el-icon>
+        </div>
+        <h2 class="title">CAMPUS HUB</h2>
+        <p class="subtitle">校园信息共享平台</p>
+      </div>
       
-      <el-tabs v-model="activeTab">
-        <el-tab-pane label="登录账号" name="login">
+      <el-tabs v-model="activeTab" stretch>
+        <el-tab-pane label="通行证登录" name="login">
           <el-form :model="loginForm" label-position="top">
-            <el-form-item label="学号/账号">
-              <el-input v-model="loginForm.username" placeholder="请输入学号" prefix-icon="User" />
+            <el-form-item>
+              <el-input v-model="loginForm.username" placeholder="学号 / 账号" prefix-icon="User" class="custom-input" />
             </el-form-item>
-            <el-form-item label="密码">
-              <el-input v-model="loginForm.password" type="password" placeholder="请输入密码" prefix-icon="Lock" show-password />
+            <el-form-item>
+              <el-input v-model="loginForm.password" type="password" placeholder="密码" prefix-icon="Lock" show-password class="custom-input" />
             </el-form-item>
-            <el-button type="primary" class="submit-btn" @click="handleLogin">登 录</el-button>
+            <el-button type="primary" class="submit-btn" @click="handleLogin" :loading="loading">进入平台</el-button>
           </el-form>
         </el-tab-pane>
 
-        <el-tab-pane label="注册新账号" name="register">
+        <el-tab-pane label="新成员注册" name="register">
           <el-form :model="registerForm" label-position="top">
-            <el-form-item label="学号/账号">
-              <el-input v-model="registerForm.username" placeholder="请输入学号" prefix-icon="User" />
+            <el-form-item>
+              <el-input v-model="registerForm.username" placeholder="学号" prefix-icon="User" class="custom-input" />
             </el-form-item>
-            <el-form-item label="密码">
-              <el-input v-model="registerForm.password" type="password" placeholder="设置密码" prefix-icon="Lock" show-password />
+            <el-form-item>
+              <el-input v-model="registerForm.nickname" placeholder="昵称" prefix-icon="Edit" class="custom-input" />
             </el-form-item>
-            <el-form-item label="昵称">
-              <el-input v-model="registerForm.nickname" placeholder="给自己起个好听的昵称" prefix-icon="Edit" />
+            <el-form-item>
+              <el-input v-model="registerForm.password" type="password" placeholder="设置密码" prefix-icon="Lock" show-password class="custom-input" />
             </el-form-item>
-            <el-button type="success" class="submit-btn" @click="handleRegister">注 册</el-button>
+            <el-button type="success" class="submit-btn" @click="handleRegister">提交注册</el-button>
           </el-form>
         </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <div class="footer-note">© 2026 Campus Information Sharing Platform. Built for Excellence.</div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import request from '../utils/request' // 引入我们刚才写的网络工具
-import { ElMessage } from 'element-plus' // 引入好看的弹窗提示
-// 👉 1. 引入路由工具
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import request from '../utils/request'
+import { ElMessage } from 'element-plus'
 
-const activeTab = ref('login')
-// 👉 2. 实例化路由
 const router = useRouter()
+const activeTab = ref('login')
+const loading = ref(false)
+const particleCanvas = ref(null)
 
-const loginForm = ref({
-  username: '',
-  password: ''
-})
+const loginForm = ref({ username: '', password: '' })
+const registerForm = ref({ username: '', password: '', nickname: '' })
 
-const registerForm = ref({
-  username: '',
-  password: '',
-  nickname: ''
-})
-
-// 🚀 真正的登录逻辑
+// 登录/注册逻辑保持不变
 const handleLogin = async () => {
-  if (!loginForm.value.username || !loginForm.value.password) {
-    return ElMessage.warning('账号和密码不能为空哦！')
-  }
-  
+  if (!loginForm.value.username || !loginForm.value.password) return ElMessage.warning('请填写完整信息')
+  loading.value = true
   try {
-    // 向后端发送 POST 请求
     const res = await request.post('/api/login', loginForm.value)
-    
-    // 如果后端返回 200，说明成功
     if (res.data.code === 200) {
-      ElMessage.success('登录成功！欢迎回来~')
-      // 【核心考点】把拿到的 JWT 通行证偷偷存在浏览器的本地仓库里！
+      ElMessage.success('欢迎回来')
       localStorage.setItem('token', res.data.data.token)
-      
-      // 👉 3. 登录成功后，跳转到主页！
       router.push('/home')
-      
-    } else {
-      // 密码错误或账号不存在
-      ElMessage.error(res.data.message)
-    }
-  } catch (error) {
-    ElMessage.error('服务器走神了')
-  }
+    } else { ElMessage.error(res.data.message) }
+  } catch (error) { ElMessage.error('服务器走神了') }
+  finally { loading.value = false }
 }
 
-// 🚀 真正的注册逻辑
 const handleRegister = async () => {
-  if (!registerForm.value.username || !registerForm.value.password) {
-    return ElMessage.warning('账号和密码不能为空！')
-  }
-  
   try {
     const res = await request.post('/api/register', registerForm.value)
-    
     if (res.data.code === 200) {
-      ElMessage.success('注册成功！快去登录吧！')
-      // 注册成功后，自动帮你把标签页切回到“登录”
-      activeTab.value = 'login' 
-    } else {
-      ElMessage.error(res.data.message)
-    }
-  } catch (error) {
-    ElMessage.error('网络请求失败')
-  }
+      ElMessage.success('注册成功，请登录')
+      activeTab.value = 'login'
+    } else { ElMessage.error(res.data.message) }
+  } catch (error) { ElMessage.error('网络请求失败') }
 }
+
+// 🎨 Canvas 粒子系统逻辑 (调整为白蓝色调)
+let animationFrame
+const initParticles = () => {
+  const canvas = particleCanvas.value
+  const ctx = canvas.getContext('2d')
+  let particles = []
+  
+  const resize = () => {
+    canvas.width = window.innerWidth
+    canvas.height = window.innerHeight
+  }
+  
+  class Particle {
+    constructor() {
+      this.x = Math.random() * canvas.width
+      this.y = Math.random() * canvas.height
+      this.vx = (Math.random() - 0.5) * 0.4
+      this.vy = (Math.random() - 0.5) * 0.4
+      this.radius = Math.random() * 2.5
+    }
+    draw() {
+      ctx.beginPath()
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+      ctx.fill()
+    }
+    update() {
+      this.x += this.vx
+      this.y += this.vy
+      if (this.x < 0 || this.x > canvas.width) this.vx *= -1
+      if (this.y < 0 || this.y > canvas.height) this.vy *= -1
+    }
+  }
+
+  for (let i = 0; i < 80; i++) particles.push(new Particle())
+
+  const animate = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    particles.forEach(p => {
+      p.update()
+      p.draw()
+    })
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x
+        const dy = particles[i].y - particles[j].y
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist < 120) {
+          ctx.beginPath()
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.15 - dist/800})`
+          ctx.lineWidth = 0.6
+          ctx.moveTo(particles[i].x, particles[i].y)
+          ctx.lineTo(particles[j].x, particles[j].y)
+          ctx.stroke()
+        }
+      }
+    }
+    animationFrame = requestAnimationFrame(animate)
+  }
+
+  window.addEventListener('resize', resize)
+  resize()
+  animate()
+}
+
+onMounted(() => initParticles())
+onUnmounted(() => {
+  cancelAnimationFrame(animationFrame)
+  window.removeEventListener('resize', () => {})
+})
 </script>
 
 <style scoped>
-.login-container {
+.login-page {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  /* 👉 背景改为浅蓝色渐变，更有呼吸感 */
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+  overflow: hidden;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 100vh;
-  background-image: linear-gradient(120deg, #a1c4fd 0%, #c2e9fb 100%); /* 漂亮的渐变背景 */
+}
+
+.particle-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
 }
 
 .login-card {
+  position: relative;
+  z-index: 10;
   width: 400px;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6); /* 白色半透明背景 */
+  backdrop-filter: blur(20px); /* 磨砂玻璃效果增强 */
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05); /* 柔和的阴影 */
+  padding: 10px;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 25px;
+  margin-top: 10px;
+}
+
+.logo-icon {
+  background: white;
+  width: 70px;
+  height: 70px;
+  border-radius: 20px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0 auto 15px;
+  box-shadow: 0 8px 20px rgba(64, 158, 255, 0.1);
 }
 
 .title {
-  text-align: center;
-  color: #303133;
-  margin-bottom: 20px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  margin: 0;
+  color: #334155;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 5px;
+}
+
+/* 输入框定制 */
+:deep(.custom-input .el-input__wrapper) {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02) !important;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  height: 45px;
+}
+
+:deep(.custom-input.is-focus .el-input__wrapper) {
+  border-color: #409EFF;
 }
 
 .submit-btn {
   width: 100%;
-  margin-top: 10px;
+  margin-top: 15px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  box-shadow: 0 10px 20px rgba(64, 158, 255, 0.2);
+  transition: all 0.3s;
+}
+
+.submit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 30px rgba(64, 158, 255, 0.3);
+}
+
+.footer-note {
+  position: absolute;
+  bottom: 30px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+:deep(.el-tabs__nav-wrap::after) {
+  background-color: transparent;
+}
+:deep(.el-tabs__item) {
+  font-weight: 500;
+  color: #94a3b8;
 }
 </style>
