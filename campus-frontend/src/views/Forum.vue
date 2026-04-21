@@ -82,6 +82,19 @@
         </el-card>
         <el-empty v-if="postList.length === 0" description="没有找到相关帖子" />
 
+        <div class="pagination-container" v-if="totalPosts > 0">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[5, 10, 20, 50]"
+            background
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="totalPosts"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+          />
+        </div>
+
         <el-dialog v-model="dialogVisible" title="📝 发布论坛帖子" width="50%">
           <el-form :model="postForm" label-width="80px">
             <el-form-item label="标题" required>
@@ -127,6 +140,10 @@ const searchQuery = ref('')
 const selectedCategory = ref('')
 const postForm = ref({ title: '', category_id: '', tags: '', content: '' })
 const myFavoriteIds = ref([]) // 用来存当前用户收藏过的帖子 ID
+// 👉 [新增] 分页相关状态
+const currentPage = ref(1)   // 当前页码
+const pageSize = ref(10)     // 每页显示几条
+const totalPosts = ref(0)    // 总帖子数
 
 // 👉 [新增] 获取用户所有的收藏记录 ID
 const fetchMyFavorites = async () => {
@@ -144,15 +161,22 @@ const fetchMyFavorites = async () => {
 const fetchPosts = async () => {
   try {
     const res = await request.get('/api/posts', {
-      params: { keyword: searchQuery.value, categoryId: selectedCategory.value }
+      params: { 
+        keyword: searchQuery.value, 
+        categoryId: selectedCategory.value,
+        // 把前端的页码和条数传给后端
+        page: currentPage.value,
+        limit: pageSize.value
+      }
     })
     if (res.data.code === 200) {
-      // 👉 [重点修改] 遍历帖子，打上是否被收藏的标签
       postList.value = res.data.data.map(post => ({
         ...post,
         is_favorited: myFavoriteIds.value.includes(post.id),
         is_liked: myLikedIds.value.includes(post.id),
       }))
+      // 👉 关键：接收后端传来的总条数，喂给分页器
+      totalPosts.value = res.data.total
     }
   } catch (error) { console.error('获取帖子失败') }
 }
@@ -164,7 +188,24 @@ const fetchCategories = async () => {
   } catch (error) { console.error('获取分类失败') }
 }
 
-const executeSearch = () => { fetchPosts() }
+const executeSearch = () => {
+  // 经典防爆雷：搜索条件变了，必须强行把页码拉回第 1 页！
+  // 否则如果你在第 5 页搜索一个只有 2 条结果的词，就会白屏。
+  currentPage.value = 1 
+  fetchPosts() 
+}
+// 👉 [新增] 切换每页显示条数 (比如从 10条/页 变成 20条/页)
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1 // 改变条数后，为了防止页码越界，重置回第 1 页
+  fetchPosts()
+}
+
+// 👉 [新增] 点击下一页 / 点击具体页码
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  fetchPosts()
+}
 
 const submitPost = async () => {
   if (!postForm.value.title || !postForm.value.content || !postForm.value.category_id) {
@@ -282,6 +323,13 @@ onMounted(async () => { // 👉 关键修复：在这里加上 async
 .filter-group {
   display: flex;
   gap: 15px;
+}
+/* 👉 [新增] 分页器居中排版 */
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 30px;
+  padding-bottom: 20px;
 }
 .search-input { width: 350px; }
 .filter-select { width: 150px; }

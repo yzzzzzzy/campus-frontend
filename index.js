@@ -153,47 +153,49 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
     }
 });
 
-// 👉 [升级版] 4. 获取帖子列表接口 (支持关键词搜索和分类筛选)
+// 👉 [升级版] 获取论坛帖子列表 (支持分页、搜索、分类)
 app.get('/api/posts', async (req, res) => {
     try {
-        // 获取前端可能传过来的搜索条件
-        const { keyword, categoryId } = req.query;
+        const keyword = req.query.keyword || '';
+        const categoryId = req.query.categoryId || '';
 
-        // 基础的 SQL 联查语句
-        let query = `
-            SELECT p.*, c.name AS category_name, u.nickname AS author_name,
-            (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) AS likes_count 
-            FROM posts p
-            LEFT JOIN categories c ON p.category_id = c.id
-            LEFT JOIN users u ON p.user_id = u.id  
-            WHERE 1=1
-        `;
+        // 👉 [新增] 接收分页参数，默认第1页，每页10条
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const offset = (page - 1) * limit; // 计算要跳过多少条数据
 
-        const queryParams = [];
+        let queryParams = [];
+        let whereClause = 'WHERE 1=1'; // 1=1 是个拼接 SQL 的小技巧
 
-        // 如果前端传了板块ID，就加上板块过滤
+        if (keyword) {
+            whereClause += ' AND (p.title LIKE ? OR p.content LIKE ?)';
+            queryParams.push(`%${keyword}%`, `%${keyword}%`);
+        }
         if (categoryId) {
-            query += ` AND p.category_id = ?`;
+            whereClause += ' AND p.category_id = ?';
             queryParams.push(categoryId);
         }
 
-        // 如果前端传了关键词，就加上模糊搜索 (搜标题或内容)
-        if (keyword) {
-            query += ` AND (p.title LIKE ? OR p.content LIKE ?)`;
-            const likeKeyword = `%${keyword}%`; // SQL 里的模糊匹配符号
-            queryParams.push(likeKeyword, likeKeyword);
-        }
+        // 👉 1. 先查符合条件的总条数 (前端分页器必须知道一共有多少条，才能算出有多少页)
+        const countQuery = `SELECT COUNT(*) as total FROM posts p ${whereClause}`;
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0].total;
 
-        // 最后加上按时间倒序排列
-        query += ` ORDER BY p.created_at DESC`;
+        // 👉 2. 再查当前页的具体数据 (加上 LIMIT 和 OFFSET)
+        const dataQuery = `
+            SELECT p.*, u.nickname as author_name, c.name as category_name
+            FROM posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            ${whereClause}
+            ORDER BY p.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+        // 注意：LIMIT 和 OFFSET 的参数必须放在数组的最后面
+        const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
 
-        const [rows] = await db.query(query, queryParams);
-
-        res.send({
-            code: 200,
-            message: '获取帖子列表成功',
-            data: rows
-        });
+        // 👉 把 total 也一起返回给前端！
+        res.send({ code: 200, message: '获取成功', data: rows, total: total });
     } catch (error) {
         console.error('获取帖子失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
