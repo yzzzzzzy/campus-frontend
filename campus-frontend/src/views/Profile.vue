@@ -106,7 +106,8 @@
                       </el-form-item>
                       <el-form-item>
                         <el-button type="primary" @click="saveSettings" :disabled="isSaveDisabled">保存修改</el-button>
-                        <el-button type="danger" plain @click="handleLogout" style="margin-left: 15px;">退出登录</el-button>
+                        <el-button type="info" plain @click="handleLogout" style="margin-left: 15px;">退出登录</el-button>
+                        <el-button type="danger" @click="handleDeleteAccount" style="margin-left: 15px;">注销账号</el-button>
                       </el-form-item>
                       
                     </el-form>
@@ -323,6 +324,38 @@ const beforeAvatarUpload = (rawFile) => {
   }
   return true;
 };
+// 👉 [新增] 高危操作：注销账号
+const handleDeleteAccount = async () => {
+  try {
+    // 弹出带有输入框的确认提示
+    await ElMessageBox.prompt(
+      '账号注销后，您的所有帖子、评论和收藏都将被永久删除！<br/>如果您确认注销，请在下方输入您的学号：<b>' + userInfo.value.username + '</b>',
+      '⚠️ 危险操作确认',
+      {
+        confirmButtonText: '确认永久注销',
+        cancelButtonText: '取消',
+        dangerouslyUseHTMLString: true, // 允许提示语中使用加粗等 HTML 标签
+        inputPattern: new RegExp(`^${userInfo.value.username}$`), // 👉 动态正则：必须一字不差地输入当前账号！
+        inputErrorMessage: '输入的账号不匹配，无法执行注销',
+        type: 'error'
+      }
+    )
+
+    // 如果用户真的输入正确并点击了确认，就会走到这里发请求
+    const res = await request.delete('/api/user/account')
+    
+    if (res.data.code === 200) {
+      ElMessage.success('账号已永久注销，期待与您的再次相遇。')
+      localStorage.removeItem('token') // 清除登录凭证
+      router.push('/login')            // 踢回登录页
+    }
+  } catch (error) {
+    // error 为 'cancel' 表示用户点了取消，不用管它
+    if (error !== 'cancel') {
+      ElMessage.error('注销失败，请稍后再试')
+    }
+  }
+}
 
 onMounted(() => {
   fetchUserInfo()

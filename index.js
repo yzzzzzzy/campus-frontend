@@ -578,6 +578,39 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     const imgUrl = `http://localhost:3000/uploads/${req.file.filename}`;
     res.send({ code: 200, message: '上传成功', url: imgUrl });
 });
+// 👉 [新增] 账号注销接口 (使用数据库事务)
+app.delete('/api/user/account', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+
+    // 从连接池中获取一个专属连接来执行事务
+    const connection = await db.getConnection();
+
+    try {
+        // 1. 开启事务
+        await connection.beginTransaction();
+
+        // 2. 依次删除该用户产生的所有关联数据 (注意顺序，从子表到主表)
+        await connection.query('DELETE FROM favorites WHERE user_id = ?', [userId]);
+        await connection.query('DELETE FROM post_likes WHERE user_id = ?', [userId]);
+        await connection.query('DELETE FROM comments WHERE user_id = ?', [userId]);
+        await connection.query('DELETE FROM posts WHERE user_id = ?', [userId]);
+
+        // 3. 最后，删除用户本体
+        await connection.query('DELETE FROM users WHERE id = ?', [userId]);
+
+        // 4. 全部成功，提交事务！
+        await connection.commit();
+        res.send({ code: 200, message: '账号已永久注销' });
+    } catch (error) {
+        // ❌ 如果中间任何一步报错，立刻回滚撤销，仿佛什么都没发生过
+        await connection.rollback();
+        console.error('注销账号失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    } finally {
+        // 释放连接回到连接池
+        connection.release();
+    }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
