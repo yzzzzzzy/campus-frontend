@@ -421,18 +421,59 @@ app.post('/api/favorites/toggle', authenticateToken, async (req, res) => {
     }
 });
 
-// 👉 [新增] 16. 获取我的收藏列表 (目前先联表查询 posts 帖子)
+// 👉 [升级版] 16. 获取我的收藏列表 (支持动态传参 type)
 app.get('/api/user/favorites', authenticateToken, async (req, res) => {
     try {
-        // 利用 JOIN 把收藏表和帖子表连起来查
-        const query = `
-            SELECT p.id, p.title, p.content, p.created_at, c.name AS category_name, f.created_at as favorited_at
-            FROM favorites f
-            JOIN posts p ON f.target_id = p.id
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE f.user_id = ? AND f.target_type = 'post'
-            ORDER BY f.created_at DESC
-        `;
+        const type = req.query.type || 'post'; // 接收前端传来的 type，默认是 post
+        let query = '';
+
+        if (type === 'post') {
+            query = `
+                SELECT p.id, p.title, p.content, p.created_at, c.name AS category_name, f.created_at as favorited_at
+                FROM favorites f
+                JOIN posts p ON f.target_id = p.id
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE f.user_id = ? AND f.target_type = 'post'
+                ORDER BY f.created_at DESC
+            `;
+        } else if (type === 'study') {
+            // ... 原来的 study 查询代码保持不变 ...
+            query = `
+                SELECT s.id, s.title, s.description AS content, s.category AS category_name, f.created_at as favorited_at
+                FROM favorites f
+                JOIN study_materials s ON f.target_id = s.id 
+                WHERE f.user_id = ? AND f.target_type = 'study'
+                ORDER BY f.created_at DESC
+            `;
+        } else if (type === 'career') {
+            // 👉 [新增] 实习就业收藏
+            query = `
+                SELECT c.id, c.title, c.content, c.type AS category_name, f.created_at as favorited_at
+                FROM favorites f
+                JOIN careers c ON f.target_id = c.id 
+                WHERE f.user_id = ? AND f.target_type = 'career'
+                ORDER BY f.created_at DESC
+            `;
+        } else if (type === 'resource') {
+            // 👉 [新增] 提升资料收藏
+            query = `
+                SELECT r.id, r.title, r.description AS content, r.type AS category_name, f.created_at as favorited_at
+                FROM favorites f
+                JOIN resources r ON f.target_id = r.id 
+                WHERE f.user_id = ? AND f.target_type = 'resource'
+                ORDER BY f.created_at DESC
+            `;
+        } else if (type === 'competition') {
+            // 👉 [新增] 竞赛大厅收藏
+            query = `
+                SELECT c.id, c.title, c.description AS content, c.comp_name AS category_name, f.created_at as favorited_at
+                FROM favorites f
+                JOIN competitions c ON f.target_id = c.id 
+                WHERE f.user_id = ? AND f.target_type = 'competition'
+                ORDER BY f.created_at DESC
+            `;
+        }
+
         const [rows] = await db.query(query, [req.user.id]);
         res.send({ code: 200, message: '获取收藏成功', data: rows });
     } catch (error) {

@@ -38,9 +38,22 @@
                 
                 <div class="card-right">
                   <div class="publish-time">发布于: {{ new Date(item.created_at).toLocaleDateString() }}</div>
-                  <el-button v-if="item.type !== '面试经验'" type="warning" @click="handleApply(item.contact)">
-                    查看投递方式
-                  </el-button>
+                  
+                  <div style="display: flex; align-items: center; gap: 15px;">
+                    <el-tooltip :content="item.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
+                      <el-button 
+                        :type="item.is_favorited ? 'warning' : 'info'" 
+                        link 
+                        :icon="item.is_favorited ? 'StarFilled' : 'Star'" 
+                        @click="handleFavorite(item)" 
+                        style="font-size: 22px;" 
+                      />
+                    </el-tooltip>
+
+                    <el-button v-if="item.type !== '面试经验'" type="warning" @click="handleApply(item.contact)">
+                      查看投递方式
+                    </el-button>
+                  </div>
                 </div>
 
               </div> </el-card>
@@ -63,18 +76,25 @@ import NavBar from '../components/NavBar.vue'
 const router = useRouter()
 const activeType = ref('')
 const careerList = ref([])
+const myFavoriteIds = ref([])
 
+const fetchMyFavorites = async () => {
+  try {
+    const res = await request.get('/api/user/favorites', { params: { type: 'career' } })
+    if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
+  } catch (error) { }
+}
 const fetchCareers = async () => {
   try {
-    const res = await request.get('/api/careers', {
-      params: { type: activeType.value }
-    })
+    const res = await request.get('/api/careers', { params: { type: activeType.value } })
     if (res.data.code === 200) {
-      careerList.value = res.data.data
+      // 合并 is_favorited 状态
+      careerList.value = res.data.data.map(item => ({
+        ...item,
+        is_favorited: myFavoriteIds.value.includes(item.id)
+      }))
     }
-  } catch (error) {
-    ElMessage.error('获取就业信息失败')
-  }
+  } catch (error) { ElMessage.error('获取就业信息失败') }
 }
 
 // 动态返回标签颜色
@@ -94,10 +114,25 @@ const handleApply = (contact) => {
     type: 'info',
   })
 }
+// 👉 [新增] 3. 收藏点击事件
+const handleFavorite = async (item) => {
+  try {
+    const res = await request.post('/api/favorites/toggle', {
+      target_id: item.id,
+      target_type: 'career' // 告诉后端收藏的是实习信息
+    })
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message)
+      item.is_favorited = !item.is_favorited
+    }
+  } catch (error) { ElMessage.error('操作失败') }
+}
 
-onMounted(() => {
-  fetchCareers()
+onMounted(async () => {
+  await fetchMyFavorites()
+  await fetchCareers()
 })
+
 </script>
 
 <style scoped>

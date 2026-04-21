@@ -52,7 +52,17 @@
                 </el-tab-pane>
 
                 <el-tab-pane label="⭐ 我的收藏" name="favorites">
-                  <el-empty v-if="myFavorites.length === 0" description="你的收藏夹空空如也~" />
+                  <div style="margin-bottom: 20px; text-align: center;">
+                    <el-radio-group v-model="favoriteType" @change="fetchMyFavorites">
+                      <el-radio-button value="post">论坛帖子</el-radio-button>
+                      <el-radio-button value="study">升学资料</el-radio-button>
+                      <el-radio-button value="career">实习就业</el-radio-button>
+                      <el-radio-button value="resource">提升资源</el-radio-button>
+                      <el-radio-button value="competition">竞赛招募</el-radio-button>
+                    </el-radio-group>
+                  </div>
+
+                  <el-empty v-if="myFavorites.length === 0" description="这个分类下空空如也~" />
                   
                   <div v-for="item in myFavorites" :key="item.id" class="my-post-item">
                     <div class="post-header">
@@ -121,6 +131,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 const userInfo = ref({})
 const myPosts = ref([])
 const myFavorites = ref([]) // 👉 [新增] 我的收藏列表
+const favoriteType = ref('post') // 👉 [新增] 收藏类型
 const activeTab = ref('posts')
 const userStats = ref({ totalLikes: 0 }) // 👉 [新增] 存放统计数据
 
@@ -213,7 +224,9 @@ const handleLogout = () => {
 // 👉 [新增] 获取我的收藏
 const fetchMyFavorites = async () => {
   try {
-    const res = await request.get('/api/user/favorites')
+    const res = await request.get('/api/user/favorites', {
+      params: { type: favoriteType.value } // 传参给后端！
+    })
     if (res.data.code === 200) {
       myFavorites.value = res.data.data
     }
@@ -222,22 +235,18 @@ const fetchMyFavorites = async () => {
   }
 }
 // 👉 [新增] 在个人中心取消收藏
-const handleUnfavorite = async (postId) => {
+const handleUnfavorite = async (itemId) => {
   try {
-    // 调用我们之前写好的万能 toggle 接口
     const res = await request.post('/api/favorites/toggle', {
-      target_id: postId,
-      target_type: 'post'
+      target_id: itemId,
+      target_type: favoriteType.value // 取消帖子就是 post，取消资料就是 study
     })
     
     if (res.data.code === 200) {
       ElMessage.success('已移出收藏夹')
-      // 👉 核心体验优化：不需要刷新网页，直接用 JS 把这条数据从数组里剔除掉！
-      myFavorites.value = myFavorites.value.filter(item => item.id !== postId)
+      myFavorites.value = myFavorites.value.filter(item => item.id !== itemId)
     }
-  } catch (error) {
-    ElMessage.error('操作失败')
-  }
+  } catch (error) { ElMessage.error('操作失败') }
 }
 // 👉 [新增] 安全删除我的帖子
 const handleDeletePost = async (postId) => {

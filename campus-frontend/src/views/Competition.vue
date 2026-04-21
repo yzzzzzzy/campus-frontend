@@ -43,12 +43,25 @@
               
               <div class="comp-footer">
                 <span class="time-text">发布于: {{ new Date(item.created_at).toLocaleDateString() }}</span>
-                <el-popover v-if="item.status === '招募中'" placement="top" :width="200" trigger="click" :content="'联系方式: ' + item.contact_info">
-                  <template #reference>
-                    <el-button type="success" plain size="small">联系队长</el-button>
-                  </template>
-                </el-popover>
-                <el-button v-else type="info" plain size="small" disabled>暂不缺人</el-button>
+                
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <el-tooltip :content="item.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
+                    <el-button 
+                      :type="item.is_favorited ? 'warning' : 'info'" 
+                      link 
+                      :icon="item.is_favorited ? 'StarFilled' : 'Star'" 
+                      @click="handleFavorite(item)" 
+                      style="font-size: 20px;" 
+                    />
+                  </el-tooltip>
+
+                  <el-popover v-if="item.status === '招募中'" placement="top" :width="200" trigger="click" :content="'联系方式: ' + item.contact_info">
+                    <template #reference>
+                      <el-button type="success" plain size="small">联系队长</el-button>
+                    </template>
+                  </el-popover>
+                  <el-button v-else type="info" plain size="small" disabled>暂不缺人</el-button>
+                </div>
               </div>
             </el-card>
           </el-col>
@@ -106,17 +119,26 @@ const compForm = ref({
   description: ''
 })
 
+const myFavoriteIds = ref([])
+
+const fetchMyFavorites = async () => {
+  try {
+    const res = await request.get('/api/user/favorites', { params: { type: 'competition' } })
+    if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
+  } catch (error) { }
+}
+
 const fetchCompetitions = async () => {
   try {
-    const res = await request.get('/api/competitions', {
-      params: { status: activeStatus.value } // 空字符串时后端会查全部
-    })
+    const res = await request.get('/api/competitions', { params: { status: activeStatus.value } })
     if (res.data.code === 200) {
-      compList.value = res.data.data
+      // 👉 注入收藏状态
+      compList.value = res.data.data.map(item => ({
+        ...item,
+        is_favorited: myFavoriteIds.value.includes(item.id)
+      }))
     }
-  } catch (error) {
-    ElMessage.error('获取组队列表失败')
-  }
+  } catch (error) { ElMessage.error('获取组队列表失败') }
 }
 // 👉 [新增] 提交竞赛招募的方法
 const submitCompetition = async () => {
@@ -144,8 +166,22 @@ const submitCompetition = async () => {
   }
 }
 
-onMounted(() => {
-  fetchCompetitions()
+const handleFavorite = async (item) => {
+  try {
+    const res = await request.post('/api/favorites/toggle', {
+      target_id: item.id,
+      target_type: 'competition'
+    })
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message)
+      item.is_favorited = !item.is_favorited
+    }
+  } catch (error) { ElMessage.error('操作失败') }
+}
+
+onMounted(async () => {
+  await fetchMyFavorites()
+  await fetchCompetitions()
 })
 </script>
 

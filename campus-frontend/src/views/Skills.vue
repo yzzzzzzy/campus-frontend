@@ -28,9 +28,22 @@
               </div>
               <div class="resource-footer">
                 <span class="time-text">收录于: {{ new Date(item.created_at).toLocaleDateString() }}</span>
-                <el-button type="primary" plain size="small" @click="goToLearn(item.url)">
-                  前往学习
-                </el-button>
+                
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <el-tooltip :content="item.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
+                    <el-button 
+                      :type="item.is_favorited ? 'warning' : 'info'" 
+                      link 
+                      :icon="item.is_favorited ? 'StarFilled' : 'Star'" 
+                      @click="handleFavorite(item)" 
+                      style="font-size: 20px;" 
+                    />
+                  </el-tooltip>
+
+                  <el-button type="primary" plain size="small" @click="goToLearn(item.url)">
+                    前往学习
+                  </el-button>
+                </div>
               </div>
             </el-card>
           </el-col>
@@ -52,19 +65,28 @@ import NavBar from '../components/NavBar.vue'
 const router = useRouter()
 const activeCategory = ref('') // 当前选中的分类，空字符串代表全部
 const resourceList = ref([])
+const myFavoriteIds = ref([])
+
+// 获取当前用户在该模块的收藏 ID 列表
+const fetchMyFavorites = async () => {
+  try {
+    const res = await request.get('/api/user/favorites', { params: { type: 'resource' } })
+    if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
+  } catch (error) { }
+}
 
 // 获取资源列表的方法，支持传入分类参数
 const fetchResources = async (type = '') => {
   try {
-    const res = await request.get('/api/resources', {
-      params: { type: type }
-    })
+    const res = await request.get('/api/resources', { params: { type: type } })
     if (res.data.code === 200) {
-      resourceList.value = res.data.data
+      // 👉 注入收藏状态
+      resourceList.value = res.data.data.map(item => ({
+        ...item,
+        is_favorited: myFavoriteIds.value.includes(item.id)
+      }))
     }
-  } catch (error) {
-    ElMessage.error('获取资源列表失败')
-  }
+  } catch (error) { ElMessage.error('获取资源列表失败') }
 }
 
 // 切换分类标签时触发
@@ -86,10 +108,23 @@ const getTagType = (type) => {
   }
   return colorMap[type] || 'info'
 }
+const handleFavorite = async (item) => {
+  try {
+    const res = await request.post('/api/favorites/toggle', {
+      target_id: item.id,
+      target_type: 'resource' // 这里的 type 要和后端对应
+    })
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message)
+      item.is_favorited = !item.is_favorited
+    }
+  } catch (error) { ElMessage.error('操作失败') }
+}
 
 // 页面加载时默认获取全部资源
-onMounted(() => {
-  fetchResources()
+onMounted(async () => {
+  await fetchMyFavorites()
+  await fetchResources()
 })
 </script>
 

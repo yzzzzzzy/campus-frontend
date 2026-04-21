@@ -33,6 +33,16 @@
             </div>
             
             <div class="material-action">
+              <el-tooltip :content="item.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
+                <el-button 
+                  :type="item.is_favorited ? 'warning' : 'info'" 
+                  link 
+                  :icon="item.is_favorited ? 'StarFilled' : 'Star'" 
+                  @click="handleFavorite(item)" 
+                  style="font-size: 22px; margin-right: 15px;" 
+                />
+              </el-tooltip>
+              
               <el-button type="primary" icon="Download" @click="handleDownload(item.download_url)">
                 获取资料
               </el-button>
@@ -55,18 +65,28 @@ import NavBar from '../components/NavBar.vue'
 const router = useRouter()
 const activeCategory = ref('')
 const studyList = ref([])
+const myFavoriteIds = ref([])
 
+// 1. 获取用户在 study 模块的收藏记录
+const fetchMyFavorites = async () => {
+  try {
+    const res = await request.get('/api/user/favorites', { params: { type: 'study' } }) // 明确告诉后端查 study
+    if (res.data.code === 200) {
+      myFavoriteIds.value = res.data.data.map(item => item.id)
+    }
+  } catch (error) { }
+}
 const fetchStudyMaterials = async (category = '') => {
   try {
-    const res = await request.get('/api/study', {
-      params: { category: category }
-    })
+    const res = await request.get('/api/study', { params: { category: category } })
     if (res.data.code === 200) {
-      studyList.value = res.data.data
+      // 遍历资料，比对收藏 ID
+      studyList.value = res.data.data.map(item => ({
+        ...item,
+        is_favorited: myFavoriteIds.value.includes(item.id)
+      }))
     }
-  } catch (error) {
-    ElMessage.error('获取资料列表失败')
-  }
+  } catch (error) { ElMessage.error('获取资料列表失败') }
 }
 
 const handleCategoryChange = (tabName) => {
@@ -79,9 +99,22 @@ const handleDownload = (url) => {
     window.open(url, '_blank')
   }, 800)
 }
+const handleFavorite = async (item) => {
+  try {
+    const res = await request.post('/api/favorites/toggle', {
+      target_id: item.id,
+      target_type: 'study' // 👉 关键：告诉后端我这次收藏的是资料
+    })
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message)
+      item.is_favorited = !item.is_favorited // 前端秒切状态
+    }
+  } catch (error) { ElMessage.error('操作失败') }
+}
 
-onMounted(() => {
-  fetchStudyMaterials()
+onMounted(async () => {
+  await fetchMyFavorites()
+  await fetchStudyMaterials()
 })
 </script>
 
