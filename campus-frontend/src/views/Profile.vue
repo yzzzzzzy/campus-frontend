@@ -76,16 +76,26 @@
                       <el-form-item label="用户昵称">
                         <el-input v-model="settingsForm.nickname" placeholder="给自己起个好听的昵称" />
                       </el-form-item>
-                      <el-form-item label="头像链接 (URL)">
-                        <el-input v-model="settingsForm.avatar" placeholder="请输入图片的网络链接，例如 http://..." />
-                        <div class="tip-text">您可以右键网页上的图片选择“复制图片地址”并粘贴于此。</div>
+                      <el-form-item label="修改头像">
+                        <el-upload
+                        class="avatar-uploader"
+                        action="http://localhost:3000/api/upload"  :show-file-list="false"
+                        :on-success="handleAvatarSuccess"
+                        :on-error="handleAvatarError"
+                        :before-upload="beforeAvatarUpload"
+                        :headers="uploadHeaders"
+                        >
+                          <img v-if="settingsForm.avatar" :src="settingsForm.avatar" class="avatar-preview" />
+                          <el-icon v-else class="avatar-uploader-icon"><Plus /></el-icon>
+                        </el-upload>
+                        <div class="tip-text">支持 JPG/PNG，大小不超过 2MB</div>
                       </el-form-item>
                       <el-form-item label="专业名称">
                         <el-input v-model="settingsForm.major" placeholder="例如：计算机科学与技术" disabled />
                         <div class="tip-text">专业信息需联系管理员修改</div>
                       </el-form-item>
                       <el-form-item>
-                        <el-button type="primary" @click="saveSettings">保存修改</el-button>
+                        <el-button type="primary" @click="saveSettings" :disabled="isSaveDisabled">保存修改</el-button>
                         <el-button type="danger" plain @click="handleLogout" style="margin-left: 15px;">退出登录</el-button>
                       </el-form-item>
                       
@@ -103,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import request from '../utils/request'
 import NavBar from '../components/NavBar.vue' // 👉 引入通用导航栏组件
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -147,6 +157,17 @@ const fetchUserInfo = async () => {
     ElMessage.error('获取用户信息失败')
   }
 }
+// 👉 [新增] 计算保存按钮是否应该被禁用
+const isSaveDisabled = computed(() => {
+  // 条件1：昵称和原来的一模一样
+  const isNicknameUnchanged = settingsForm.value.nickname === userInfo.value.nickname;
+  // 条件2：头像框是空的（灰色的加号状态）
+  const isAvatarEmpty = !settingsForm.value.avatar;
+  
+  // 只有当两个条件都满足（什么都没改）时，才禁用按钮
+  return isNicknameUnchanged && isAvatarEmpty;
+});
+
 
 const fetchMyPosts = async () => {
   try {
@@ -164,15 +185,21 @@ const saveSettings = async () => {
   try {
     const res = await request.put('/api/user/info', {
       nickname: settingsForm.value.nickname,
-      avatar: settingsForm.value.avatar
+      // 👉 [核心修改] 如果右边表单里有新头像，就用新的；如果是空的，就用左边名片里原本的头像！
+      avatar: settingsForm.value.avatar || userInfo.value.avatar
     })
     
     if (res.data.code === 200) {
       ElMessage.success('个人资料已更新！')
-      // 重新拉取一次用户信息，让左侧名片和导航栏头像立刻刷新
-      fetchUserInfo() 
-      // 这里的极致体验应该是页面直接响应，但最稳妥的是刷新页面，或者通过全局状态管理
-      setTimeout(() => { location.reload() }, 1000) 
+      
+      // 1. 重新拉取用户信息，更新左侧名片
+      await fetchUserInfo()
+      
+      // 👉 2. [核心修改] 直接清空头像数据，加号瞬间回来
+      settingsForm.value.avatar = ''
+      
+      // 👉 3. [删除强制刷新] 既然数据已经双向绑定自动更新了，
+      // 我们就不需要 location.reload() 这种暴力刷新了，这样体验更丝滑！
     }
   } catch (error) {
     ElMessage.error('更新失败')
@@ -247,6 +274,39 @@ const handleDeletePost = async (postId) => {
     }
   }
 }
+// 准备上传所需的请求头（因为我们后端有 JWT 校验）
+const uploadHeaders = {
+  Authorization: `Bearer ${localStorage.getItem('token')}`
+};
+
+// 上传成功的回调
+const handleAvatarSuccess = (response) => {
+  console.log('后端返回的数据:', response) // 打印出来看！
+  
+  if (response.code === 200) {
+    settingsForm.value.avatar = response.url
+    ElMessage.success('图片上传成功！别忘了保存修改哦')
+  } else {
+    ElMessage.error(response.message || '上传出现未知错误')
+  }
+}
+// 👉 新增：增加失败回调，抓住被隐藏的错误！
+const handleAvatarError = (error) => {
+  console.error('上传直接报错了:', error)
+  ElMessage.error('网络请求失败，请打开 F12 查看控制台')
+}
+// 上传前的校验
+const beforeAvatarUpload = (rawFile) => {
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+  if (!allowedTypes.includes(rawFile.type)) {
+    ElMessage.error('头像图片必须是 JPG/PNG/GIF 格式!');
+    return false;
+  } else if (rawFile.size / 1024 / 1024 > 2) {
+    ElMessage.error('图片大小不能超过 2MB!');
+    return false;
+  }
+  return true;
+};
 
 onMounted(() => {
   fetchUserInfo()
@@ -315,4 +375,19 @@ onMounted(() => {
 .post-header h4 { margin: 0 0 10px 0; }
 .post-content { font-size: 14px; color: #606266; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .post-time { font-size: 12px; color: #909399; }
+.avatar-uploader {
+  border: 1px dashed #d9d9d9;
+  border-radius: 6px;
+  cursor: pointer;
+  width: 100px;
+  height: 100px;
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.avatar-uploader:hover { border-color: #409eff; }
+.avatar-preview { width: 100px; height: 100px; object-fit: cover; }
+.avatar-uploader-icon { font-size: 28px; color: #8c939d; }
+
 </style>

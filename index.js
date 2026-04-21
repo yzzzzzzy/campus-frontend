@@ -3,15 +3,17 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs'); // 引入加密工具
 const jwt = require('jsonwebtoken'); // 引入 Token 工具
 require('dotenv').config();
-
+const multer = require('multer');
+const path = require('path');
 // 👉 [新增] 引入我们刚刚写好的数据库连接文件
 const db = require('./db');
 const authenticateToken = require('./auth'); // 引入保安
-
 const app = express();
+
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 原来的基础测试接口
 app.get('/', (req, res) => {
@@ -506,6 +508,34 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
 
         res.send({ code: 200, data: { totalLikes: likeRes[0].totalLikes } });
     } catch (error) { res.status(500).send({ code: 500 }); }
+});
+
+// 1. 配置磁盘存储
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/'); // 保存到 uploads 文件夹
+    },
+    filename: function (req, file, cb) {
+        // 关键：重命名文件，防止重名覆盖（时间戳 + 随机数 + 原后缀）
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 2 * 1024 * 1024 }, // 限制 2MB
+});
+
+// 2. 创建上传接口
+app.post('/api/upload', upload.single('file'), (req, res) => {
+    if (!req.file) {
+        return res.send({ code: 400, message: '请选择要上传的图片' });
+    }
+    // 构建图片在服务器上的访问 URL
+    // 注意：实际开发中这里通常写成相对路径或配置好的域名
+    const imgUrl = `http://localhost:3000/uploads/${req.file.filename}`;
+    res.send({ code: 200, message: '上传成功', url: imgUrl });
 });
 
 const PORT = process.env.PORT || 3000;

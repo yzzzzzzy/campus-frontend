@@ -2,18 +2,22 @@
   <div class="common-layout">
     <el-container>
       <NavBar title="💬 校园综合论坛" bgColor="#F56C6C">
-        <el-button type="warning" plain icon="Edit" @click="dialogVisible = true">发布帖子</el-button>
+        <el-button @click="router.push('/home')" icon="Back">返回主页</el-button>
       </NavBar>
 
       <el-main class="main-content">
         <div class="toolbar">
-          <el-input v-model="searchQuery" placeholder="搜索帖子标题或正文内容..." clearable class="search-input" @keyup.enter="executeSearch">
-            <template #append><el-button icon="Search" @click="executeSearch" /></template>
-          </el-input>
-          <el-select v-model="selectedCategory" placeholder="全部分类" clearable class="filter-select" @change="executeSearch">
-            <el-option label="全部分类" value="" /> 
-            <el-option v-for="cat in categoryList" :key="cat.id" :label="cat.name" :value="cat.id" />
-          </el-select>
+          <div class="filter-group">
+            <el-input v-model="searchQuery" placeholder="搜索帖子标题或正文内容..." clearable class="search-input" @keyup.enter="executeSearch">
+              <template #append><el-button icon="Search" @click="executeSearch" /></template>
+            </el-input>
+            <el-select v-model="selectedCategory" placeholder="全部分类" clearable class="filter-select" @change="executeSearch">
+              <el-option label="全部分类" value="" /> 
+              <el-option v-for="cat in categoryList" :key="cat.id" :label="cat.name" :value="cat.id" />
+            </el-select>
+          </div>
+          
+          <el-button type="danger" icon="Edit" @click="dialogVisible = true">发布帖子</el-button>
         </div>
 
         <el-card v-for="post in postList" :key="post.id" class="post-card" shadow="hover">
@@ -265,7 +269,20 @@ onMounted(async () => { // 👉 关键修复：在这里加上 async
   min-height: calc(100vh - 60px);
   padding: 20px 10%;
 }
-.toolbar { display: flex; margin-bottom: 20px; gap: 15px; }
+/* 👉 [修改] 工具栏排版样式 */
+.toolbar { 
+  display: flex; 
+  justify-content: space-between; /* 左右两端对齐 */
+  align-items: center;
+  margin-bottom: 20px; 
+  background-color: white; /* 加上白底，和其他页面统一 */
+  padding: 15px 20px;
+  border-radius: 8px;
+}
+.filter-group {
+  display: flex;
+  gap: 15px;
+}
 .search-input { width: 350px; }
 .filter-select { width: 150px; }
 .post-card { margin-bottom: 20px; }
