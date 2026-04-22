@@ -111,6 +111,23 @@
                       </el-form-item>
                       
                     </el-form>
+
+                    <el-divider content-position="left">修改密码</el-divider>
+
+                    <el-form :model="passwordForm" label-width="100px" label-position="left" class="password-form">
+                      <el-form-item label="当前密码">
+                        <el-input v-model="passwordForm.currentPassword" type="password" show-password placeholder="请输入当前密码" autocomplete="current-password" />
+                      </el-form-item>
+                      <el-form-item label="新密码">
+                        <el-input v-model="passwordForm.newPassword" type="password" show-password placeholder="请输入新密码" autocomplete="new-password" />
+                      </el-form-item>
+                      <el-form-item label="确认密码">
+                        <el-input v-model="passwordForm.confirmPassword" type="password" show-password placeholder="再次输入新密码" autocomplete="new-password" />
+                      </el-form-item>
+                      <el-form-item>
+                        <el-button type="warning" @click="handleChangePassword" :disabled="isPasswordChangeDisabled">修改密码</el-button>
+                      </el-form-item>
+                    </el-form>
                   </div>
                 </el-tab-pane>
 
@@ -161,6 +178,12 @@ const settingsForm = ref({
   major: ''
 })
 
+const passwordForm = ref({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+
 const fetchUserInfo = async () => {
   try {
     const res = await request.get('/api/user/info')
@@ -190,6 +213,10 @@ const isSaveDisabled = computed(() => {
   // 只有当两个条件都满足（什么都没改）时，才禁用按钮
   return isNicknameUnchanged && isAvatarEmpty;
 });
+
+const isPasswordChangeDisabled = computed(() => {
+  return !passwordForm.value.currentPassword || !passwordForm.value.newPassword || !passwordForm.value.confirmPassword
+})
 
 
 const fetchMyPosts = async () => {
@@ -230,9 +257,39 @@ const saveSettings = async () => {
     ElMessage.error('更新失败')
   }
 }
+
+const handleChangePassword = async () => {
+  if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+    ElMessage.error('两次输入的新密码不一致')
+    return
+  }
+
+  try {
+    const res = await request.put('/api/user/password', {
+      currentPassword: passwordForm.value.currentPassword,
+      newPassword: passwordForm.value.newPassword,
+      confirmPassword: passwordForm.value.confirmPassword
+    })
+
+    if (res.data.code === 200) {
+      ElMessage.success('密码修改成功，请重新登录')
+      passwordForm.value.currentPassword = ''
+      passwordForm.value.newPassword = ''
+      passwordForm.value.confirmPassword = ''
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      router.push('/login')
+    } else {
+      ElMessage.error(res.data.message)
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '修改密码失败')
+  }
+}
 // 👉 [新增] 退出登录逻辑
 const handleLogout = () => {
   localStorage.removeItem('token')
+  localStorage.removeItem('user')
   router.push('/login')
 }
 // 👉 [新增] 获取我的收藏

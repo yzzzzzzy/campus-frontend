@@ -1,0 +1,2 @@
+ALTER TABLE users
+  ADD COLUMN status TINYINT(1) NOT NULL DEFAULT 1 COMMENT '账号状态：1正常，0封禁';

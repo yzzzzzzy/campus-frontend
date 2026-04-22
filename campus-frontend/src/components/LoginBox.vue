@@ -68,7 +68,8 @@ const handleLogin = async () => {
     if (res.data.code === 200) {
       ElMessage.success('欢迎回来')
       localStorage.setItem('token', res.data.data.token)
-      router.push('/home')
+      localStorage.setItem('user', JSON.stringify(res.data.data.user))
+      router.push(Number(res.data.data.user?.role) === 1 ? '/admin' : '/home')
     } else { ElMessage.error(res.data.message) }
   } catch (error) { ElMessage.error('服务器走神了') }
   finally { loading.value = false }
