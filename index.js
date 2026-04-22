@@ -8,6 +8,7 @@ const path = require('path');
 // 👉 [新增] 引入我们刚刚写好的数据库连接文件
 const db = require('./db');
 const authenticateToken = require('./auth'); // 引入保安
+const isAdmin = authenticateToken.isAdmin;
 const app = express();
 
 // 竞赛发布限流：同一用户 60 秒内最多发布 3 次，防止恶意刷接口
@@ -40,6 +41,15 @@ const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '
 const normalizeOptionalString = (value) => {
     const normalized = normalizeString(value);
     return normalized || null;
+};
+const normalizeStatus = (value) => {
+    if (value === 0 || value === '0' || value === false) {
+        return 0;
+    }
+    if (value === 1 || value === '1' || value === true) {
+        return 1;
+    }
+    return null;
 };
 const toPositiveInt = (value) => {
     const num = Number.parseInt(value, 10);
@@ -121,8 +131,8 @@ app.post('/api/register', async (req, res) => {
 
         // 4. 将新用户存入数据库 (注意这里存的是加密后的密码)
         await db.query(
-            'INSERT INTO users (username, password, nickname, major, skills) VALUES (?, ?, ?, ?, ?)',
-            [normalizedUsername, hashedPassword, normalizedNickname, normalizedMajor, normalizedSkills]
+            'INSERT INTO users (username, password, nickname, major, skills, status) VALUES (?, ?, ?, ?, ?, ?)',
+            [normalizedUsername, hashedPassword, normalizedNickname, normalizedMajor, normalizedSkills, 1]
         );
 
         res.send({ code: 200, message: '注册成功！欢迎加入平台！' });
@@ -152,6 +162,10 @@ app.post('/api/login', async (req, res) => {
 
         const user = users[0];
 
+        if (Number(user.status) === 0) {
+            return res.status(403).send({ code: 403, message: '账号已被封禁，请联系管理员' });
+        }
+
         // 2. 核心考点：校验密码（将用户输入的明文和数据库里的密文进行安全比对）
         const isPasswordValid = bcrypt.compareSync(normalizedPassword, user.password);
         if (!isPasswordValid) {
@@ -176,7 +190,8 @@ app.post('/api/login', async (req, res) => {
                     username: user.username,
                     nickname: user.nickname,
                     major: user.major,
-                    role: user.role
+                    role: user.role,
+                    status: user.status
                 }
             }
         });
@@ -287,7 +302,7 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
     try {
         // 从数据库查询当前用户的详细信息（密码除外）
         const [users] = await db.query(
-            'SELECT id, username, nickname, major, skills, avatar, created_at FROM users WHERE id = ?',
+            'SELECT id, username, nickname, major, skills, avatar, created_at, role, status FROM users WHERE id = ?',
             [req.user.id]
         );
 
@@ -297,6 +312,159 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
         res.send({ code: 200, message: '获取成功', data: users[0] });
     } catch (error) {
         console.error('获取用户信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员数据面板统计
+app.get('/api/admin/stats', isAdmin, async (req, res) => {
+    try {
+        const [[userStats], [postStats]] = await Promise.all([
+            db.query(`
+                SELECT
+                    COUNT(*) AS totalUsers,
+                    SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) AS activeUsers,
+                    SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) AS bannedUsers,
+                    SUM(CASE WHEN role = 1 THEN 1 ELSE 0 END) AS adminUsers
+                FROM users
+            `),
+            db.query(`
+                SELECT
+                    COUNT(*) AS totalPosts,
+                    SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayPosts
+                FROM posts
+            `)
+        ]);
+
+        res.send({
+            code: 200,
+            message: '获取成功',
+            data: {
+                totalUsers: Number(userStats[0]?.totalUsers || 0),
+                activeUsers: Number(userStats[0]?.activeUsers || 0),
+                bannedUsers: Number(userStats[0]?.bannedUsers || 0),
+                adminUsers: Number(userStats[0]?.adminUsers || 0),
+                totalPosts: Number(postStats[0]?.totalPosts || 0),
+                todayPosts: Number(postStats[0]?.todayPosts || 0)
+            }
+        });
+    } catch (error) {
+        console.error('获取管理员统计失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员获取全站用户
+app.get('/api/admin/users', isAdmin, async (req, res) => {
+    try {
+        const keyword = normalizeString(req.query.keyword);
+        const status = normalizeStatus(req.query.status);
+
+        let whereClause = 'WHERE 1=1';
+        const queryParams = [];
+
+        if (keyword) {
+            whereClause += ' AND (username LIKE ? OR nickname LIKE ? OR major LIKE ? OR skills LIKE ?)';
+            queryParams.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+        }
+
+        if (status !== null) {
+            whereClause += ' AND status = ?';
+            queryParams.push(status);
+        }
+
+        const query = `
+            SELECT id, username, nickname, major, skills, role, status, created_at
+            FROM users
+            ${whereClause}
+            ORDER BY created_at DESC
+        `;
+
+        const [rows] = await db.query(query, queryParams);
+        res.send({ code: 200, message: '获取成功', data: rows });
+    } catch (error) {
+        console.error('获取用户列表失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员封禁/解封用户
+app.patch('/api/admin/users/:id/status', isAdmin, async (req, res) => {
+    try {
+        const targetUserId = toPositiveInt(req.params.id);
+        const nextStatus = normalizeStatus(req.body.status);
+
+        if (!targetUserId) {
+            return res.send({ code: 400, message: '用户ID格式不正确' });
+        }
+        if (nextStatus === null) {
+            return res.send({ code: 400, message: '状态值只能是 0 或 1' });
+        }
+        if (targetUserId === req.user.id) {
+            return res.send({ code: 400, message: '不能修改自己的账号状态' });
+        }
+
+        const [targetUsers] = await db.query('SELECT id, role FROM users WHERE id = ? LIMIT 1', [targetUserId]);
+        if (targetUsers.length === 0) {
+            return res.send({ code: 404, message: '目标用户不存在' });
+        }
+        if (Number(targetUsers[0].role) === 1) {
+            return res.send({ code: 400, message: '管理员账号不支持在此页面封禁或解封' });
+        }
+
+        await db.query('UPDATE users SET status = ? WHERE id = ?', [nextStatus, targetUserId]);
+
+        res.send({
+            code: 200,
+            message: nextStatus === 1 ? '用户已解封' : '用户已封禁'
+        });
+    } catch (error) {
+        console.error('更新用户状态失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员查看全站帖子
+app.get('/api/admin/posts', isAdmin, async (req, res) => {
+    try {
+        const keyword = normalizeString(req.query.keyword);
+        const authorUsername = normalizeString(req.query.username);
+
+        let whereClause = 'WHERE 1=1';
+        const queryParams = [];
+
+        if (keyword) {
+            whereClause += ' AND (p.title LIKE ? OR p.content LIKE ? OR u.nickname LIKE ? OR u.username LIKE ?)';
+            queryParams.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+        }
+
+        if (authorUsername) {
+            whereClause += ' AND u.username = ?';
+            queryParams.push(authorUsername);
+        }
+
+        const query = `
+            SELECT
+                p.id,
+                p.title,
+                p.content,
+                p.tags,
+                p.created_at,
+                p.user_id,
+                u.username AS author_username,
+                u.nickname AS author_nickname,
+                c.name AS category_name
+            FROM posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            ${whereClause}
+            ORDER BY p.created_at DESC
+        `;
+
+        const [rows] = await db.query(query, queryParams);
+        res.send({ code: 200, message: '获取成功', data: rows });
+    } catch (error) {
+        console.error('获取帖子列表失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
@@ -597,6 +765,49 @@ app.put('/api/user/info', authenticateToken, async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
+
+// 👉 [新增] 修改密码
+app.put('/api/user/password', authenticateToken, async (req, res) => {
+    try {
+        const { currentPassword, newPassword, confirmPassword } = req.body;
+        const normalizedCurrentPassword = normalizeString(currentPassword);
+        const normalizedNewPassword = normalizeString(newPassword);
+        const normalizedConfirmPassword = normalizeString(confirmPassword);
+
+        if (!normalizedCurrentPassword || !normalizedNewPassword || !normalizedConfirmPassword) {
+            return res.send({ code: 400, message: '当前密码、新密码和确认密码都不能为空' });
+        }
+        if (normalizedNewPassword.length < 6 || normalizedNewPassword.length > 50) {
+            return res.send({ code: 400, message: '新密码长度需在6到50个字符之间' });
+        }
+        if (normalizedNewPassword !== normalizedConfirmPassword) {
+            return res.send({ code: 400, message: '两次输入的新密码不一致' });
+        }
+        if (normalizedCurrentPassword === normalizedNewPassword) {
+            return res.send({ code: 400, message: '新密码不能和当前密码一样' });
+        }
+
+        const [users] = await db.query('SELECT password FROM users WHERE id = ? LIMIT 1', [req.user.id]);
+        if (users.length === 0) {
+            return res.send({ code: 404, message: '找不到当前用户' });
+        }
+
+        const isPasswordValid = bcrypt.compareSync(normalizedCurrentPassword, users[0].password);
+        if (!isPasswordValid) {
+            return res.send({ code: 400, message: '当前密码不正确' });
+        }
+
+        const salt = bcrypt.genSaltSync(10);
+        const hashedPassword = bcrypt.hashSync(normalizedNewPassword, salt);
+
+        await db.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, req.user.id]);
+
+        res.send({ code: 200, message: '密码修改成功，请重新登录' });
+    } catch (error) {
+        console.error('修改密码失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
 // 👉 [新增] 15. 收藏 / 取消收藏 (需要保安验证)
 app.post('/api/favorites/toggle', authenticateToken, async (req, res) => {
     try {
@@ -706,6 +917,7 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
     try {
         const postId = req.params.id;
         const userId = req.user.id;
+        const adminDeleting = Number(req.user.role) === 1;
 
         await connection.beginTransaction();
 
@@ -716,7 +928,7 @@ app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
             await connection.rollback();
             return res.send({ code: 404, message: '帖子不存在' });
         }
-        if (posts[0].user_id !== userId) { // 👉 这里也要改成 user_id
+        if (!adminDeleting && posts[0].user_id !== userId) { // 👉 这里也要改成 user_id
             await connection.rollback();
             return res.send({ code: 403, message: '你没有权限删除别人的帖子哦！' });
         }

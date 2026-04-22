@@ -8,9 +8,21 @@
           <div class="banner-content">
             <h1 class="banner-title">打破信息壁垒，规划理想未来</h1>
             <p class="banner-subtitle">专注于大学生的升学、竞赛、就业与高质量互助</p>
-            <el-button type="primary" size="large" class="explore-btn" @click="router.push('/forum')" round>
-              立即探索社区
-            </el-button>
+            <div class="hero-actions">
+              <el-button type="primary" size="large" class="explore-btn" @click="router.push('/forum')" round>
+                立即探索社区
+              </el-button>
+              <el-button
+                v-if="isAdmin"
+                type="warning"
+                size="large"
+                class="admin-entry-btn"
+                @click="router.push('/admin')"
+                round
+              >
+                进入管理后台
+              </el-button>
+            </div>
           </div>
         </div>
 
@@ -90,10 +102,44 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
 
 const router = useRouter()
+
+const parseJwtPayload = (token) => {
+  if (!token) return null
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return null
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const json = decodeURIComponent(
+      atob(normalized)
+        .split('')
+        .map((char) => `%${`00${char.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join('')
+    )
+    return JSON.parse(json)
+  } catch (error) {
+    return null
+  }
+}
+
+const getStoredUser = () => {
+  try {
+    const raw = localStorage.getItem('user')
+    return raw ? JSON.parse(raw) : null
+  } catch (error) {
+    return null
+  }
+}
+
+const isAdmin = computed(() => {
+  const user = getStoredUser()
+  const tokenPayload = parseJwtPayload(localStorage.getItem('token'))
+  return Number(user?.role ?? tokenPayload?.role) === 1
+})
 
 // 🎮 核心炫技：计算 3D 偏转角度
 const handleMouseMove = (e) => {
@@ -185,9 +231,29 @@ const handleMouseLeave = (e) => {
   transition: all 0.3s;
 }
 
+.hero-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.admin-entry-btn {
+  font-size: 16px;
+  font-weight: bold;
+  padding: 12px 24px;
+  box-shadow: 0 8px 20px rgba(230, 162, 60, 0.25);
+}
+
 .explore-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 25px rgba(0,0,0,0.2);
+}
+
+.admin-entry-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 25px rgba(230, 162, 60, 0.35);
 }
 
 /* 🚀 3D 卡片外层容器 */

@@ -14,10 +14,13 @@
           <el-dropdown-menu class="custom-dropdown">
             <div class="dropdown-header">
               <span class="user-name">{{ userInfo.nickname || userInfo.username }}</span>
-              <el-tag size="small" type="success" effect="dark" class="role-tag">正式会员</el-tag>
+              <el-tag size="small" :type="Number(userInfo.role) === 1 ? 'danger' : 'success'" effect="dark" class="role-tag">
+                {{ Number(userInfo.role) === 1 ? '管理员' : '正式会员' }}
+              </el-tag>
             </div>
             <el-dropdown-item command="profile" icon="User">个人中心</el-dropdown-item>
             <el-dropdown-item command="favorites" icon="Star">我的收藏</el-dropdown-item>
+            <el-dropdown-item v-if="Number(userInfo.role) === 1" command="admin" icon="Setting">管理后台</el-dropdown-item>
             <el-dropdown-item divided command="logout" icon="SwitchButton" style="color: #F56C6C;">退出登录</el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -61,6 +64,7 @@ const fetchUserInfo = async () => {
 const handleCommand = (command) => {
   if (command === 'logout') {
     localStorage.removeItem('token')
+    localStorage.removeItem('user')
     ElMessage.success('已安全退出')
     router.push('/login')
   } else if (command === 'profile') {
@@ -69,6 +73,8 @@ const handleCommand = (command) => {
     // 👉 [修改] 去掉原来的 ElMessage，改成带参数跳转！
     // 告诉个人中心：我要去 profile 页面，并且我要直接看 favorites 标签页
     router.push({ path: '/profile', query: { tab: 'favorites' } })
+  } else if (command === 'admin') {
+    router.push('/admin')
   }
 }
 
