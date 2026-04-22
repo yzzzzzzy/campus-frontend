@@ -27,7 +27,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
@@ -42,11 +42,13 @@ defineProps({
 })
 
 const userInfo = ref({})
+const isComponentActive = ref(true)
 
 // 获取当前登录用户的信息来渲染头像和昵称
 const fetchUserInfo = async () => {
   try {
     const res = await request.get('/api/user/info')
+    if (!isComponentActive.value) return
     if (res.data.code === 200) {
       userInfo.value = res.data.data
     }
@@ -73,6 +75,10 @@ const handleCommand = (command) => {
 onMounted(() => {
   fetchUserInfo()
 })
+
+onUnmounted(() => {
+  isComponentActive.value = false
+})
 </script>
 
 <style scoped>
@@ -80,6 +86,8 @@ onMounted(() => {
   width: 100%; /* 强制撑满屏幕宽度 */
   height: 60px; /* 固定高度 */
   box-sizing: border-box; /* 确保 padding 不会撑破全宽 */
+  position: sticky;
+  top: 0;
   color: white;
   display: flex;
   justify-content: space-between;

@@ -56,7 +56,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -66,11 +66,23 @@ const router = useRouter()
 const activeCategory = ref('') // 当前选中的分类，空字符串代表全部
 const resourceList = ref([])
 const myFavoriteIds = ref([])
+const isPageActive = ref(true)
+
+const syncFavoriteIds = (targetId, shouldInclude) => {
+  const ids = new Set(myFavoriteIds.value)
+  if (shouldInclude) {
+    ids.add(targetId)
+  } else {
+    ids.delete(targetId)
+  }
+  myFavoriteIds.value = Array.from(ids)
+}
 
 // 获取当前用户在该模块的收藏 ID 列表
 const fetchMyFavorites = async () => {
   try {
     const res = await request.get('/api/user/favorites', { params: { type: 'resource' } })
+    if (!isPageActive.value) return
     if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
   } catch (error) { }
 }
@@ -79,6 +91,7 @@ const fetchMyFavorites = async () => {
 const fetchResources = async (type = '') => {
   try {
     const res = await request.get('/api/resources', { params: { type: type } })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 👉 注入收藏状态
       resourceList.value = res.data.data.map(item => ({
@@ -114,9 +127,12 @@ const handleFavorite = async (item) => {
       target_id: item.id,
       target_type: 'resource' // 这里的 type 要和后端对应
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success(res.data.message)
-      item.is_favorited = !item.is_favorited
+      const nextFavorited = !item.is_favorited
+      item.is_favorited = nextFavorited
+      syncFavoriteIds(item.id, nextFavorited)
     }
   } catch (error) { ElMessage.error('操作失败') }
 }
@@ -125,6 +141,10 @@ const handleFavorite = async (item) => {
 onMounted(async () => {
   await fetchMyFavorites()
   await fetchResources()
+})
+
+onUnmounted(() => {
+  isPageActive.value = false
 })
 </script>
 

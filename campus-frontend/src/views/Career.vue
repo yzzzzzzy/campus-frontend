@@ -67,7 +67,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
@@ -77,16 +77,29 @@ const router = useRouter()
 const activeType = ref('')
 const careerList = ref([])
 const myFavoriteIds = ref([])
+const isPageActive = ref(true)
+
+const syncFavoriteIds = (targetId, shouldInclude) => {
+  const ids = new Set(myFavoriteIds.value)
+  if (shouldInclude) {
+    ids.add(targetId)
+  } else {
+    ids.delete(targetId)
+  }
+  myFavoriteIds.value = Array.from(ids)
+}
 
 const fetchMyFavorites = async () => {
   try {
     const res = await request.get('/api/user/favorites', { params: { type: 'career' } })
+    if (!isPageActive.value) return
     if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
   } catch (error) { }
 }
 const fetchCareers = async () => {
   try {
     const res = await request.get('/api/careers', { params: { type: activeType.value } })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 合并 is_favorited 状态
       careerList.value = res.data.data.map(item => ({
@@ -121,9 +134,12 @@ const handleFavorite = async (item) => {
       target_id: item.id,
       target_type: 'career' // 告诉后端收藏的是实习信息
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success(res.data.message)
-      item.is_favorited = !item.is_favorited
+      const nextFavorited = !item.is_favorited
+      item.is_favorited = nextFavorited
+      syncFavoriteIds(item.id, nextFavorited)
     }
   } catch (error) { ElMessage.error('操作失败') }
 }
@@ -131,6 +147,10 @@ const handleFavorite = async (item) => {
 onMounted(async () => {
   await fetchMyFavorites()
   await fetchCareers()
+})
+
+onUnmounted(() => {
+  isPageActive.value = false
 })
 
 </script>

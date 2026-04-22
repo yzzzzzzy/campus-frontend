@@ -10,6 +10,43 @@ const db = require('./db');
 const authenticateToken = require('./auth'); // 引入保安
 const app = express();
 
+// 竞赛发布限流：同一用户 60 秒内最多发布 3 次，防止恶意刷接口
+const competitionPublishLimiter = new Map();
+const COMPETITION_PUBLISH_WINDOW_MS = 60 * 1000;
+const COMPETITION_PUBLISH_MAX = 3;
+const SERVER_PUBLIC_BASE_URL = (process.env.SERVER_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+
+const API_ERROR_MESSAGES = {
+    401: '登录状态已失效，请重新登录',
+    403: '无权限访问该资源',
+    500: '服务器开小差了，请稍后重试'
+};
+const ALLOWED_FAVORITE_TYPES = ['post', 'study', 'career', 'resource', 'competition'];
+
+const sendApiError = (res, status = 500, message, extra = {}) => {
+    return res.status(status).send({
+        code: status,
+        message: message || API_ERROR_MESSAGES[status] || '请求失败，请稍后重试',
+        ...extra
+    });
+};
+
+const getServerBaseUrl = (req) => {
+    if (SERVER_PUBLIC_BASE_URL) return SERVER_PUBLIC_BASE_URL;
+    return `${req.protocol}://${req.get('host')}`;
+};
+
+const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+const normalizeOptionalString = (value) => {
+    const normalized = normalizeString(value);
+    return normalized || null;
+};
+const toPositiveInt = (value) => {
+    const num = Number.parseInt(value, 10);
+    return Number.isInteger(num) && num > 0 ? num : null;
+};
+const isHttpUrl = (value) => /^https?:\/\//i.test(value);
+
 
 app.use(cors());
 app.use(express.json());
@@ -50,9 +87,30 @@ app.post('/api/register', async (req, res) => {
     try {
         // 1. 获取前端传过来的账号、密码、昵称等信息
         const { username, password, nickname, major, skills } = req.body;
+        const normalizedUsername = normalizeString(username);
+        const normalizedPassword = normalizeString(password);
+        const normalizedNickname = normalizeString(nickname);
+        const normalizedMajor = normalizeOptionalString(major);
+        const normalizedSkills = normalizeOptionalString(skills);
+
+        if (!normalizedUsername || !normalizedPassword || !normalizedNickname) {
+            return res.send({ code: 400, message: '账号、密码和昵称不能为空' });
+        }
+        if (normalizedUsername.length > 50 || normalizedNickname.length > 50) {
+            return res.send({ code: 400, message: '账号或昵称长度不能超过50个字符' });
+        }
+        if (normalizedPassword.length < 6 || normalizedPassword.length > 50) {
+            return res.send({ code: 400, message: '密码长度需在6到50个字符之间' });
+        }
+        if (normalizedMajor && normalizedMajor.length > 100) {
+            return res.send({ code: 400, message: '专业长度不能超过100个字符' });
+        }
+        if (normalizedSkills && normalizedSkills.length > 255) {
+            return res.send({ code: 400, message: '技能描述长度不能超过255个字符' });
+        }
 
         // 2. 检查账号是否已经存在
-        const [existingUsers] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        const [existingUsers] = await db.query('SELECT * FROM users WHERE username = ?', [normalizedUsername]);
         if (existingUsers.length > 0) {
             return res.send({ code: 400, message: '该学号/账号已被注册！' });
         }
@@ -64,7 +122,7 @@ app.post('/api/register', async (req, res) => {
         // 4. 将新用户存入数据库 (注意这里存的是加密后的密码)
         await db.query(
             'INSERT INTO users (username, password, nickname, major, skills) VALUES (?, ?, ?, ?, ?)',
-            [username, hashedPassword, nickname, major || null, skills || null]
+            [normalizedUsername, hashedPassword, normalizedNickname, normalizedMajor, normalizedSkills]
         );
 
         res.send({ code: 200, message: '注册成功！欢迎加入平台！' });
@@ -79,9 +137,15 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
+        const normalizedUsername = normalizeString(username);
+        const normalizedPassword = normalizeString(password);
+
+        if (!normalizedUsername || !normalizedPassword) {
+            return res.send({ code: 400, message: '账号和密码不能为空' });
+        }
 
         // 1. 去数据库里找这个账号
-        const [users] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        const [users] = await db.query('SELECT * FROM users WHERE username = ?', [normalizedUsername]);
         if (users.length === 0) {
             return res.send({ code: 400, message: '账号不存在！' });
         }
@@ -89,7 +153,7 @@ app.post('/api/login', async (req, res) => {
         const user = users[0];
 
         // 2. 核心考点：校验密码（将用户输入的明文和数据库里的密文进行安全比对）
-        const isPasswordValid = bcrypt.compareSync(password, user.password);
+        const isPasswordValid = bcrypt.compareSync(normalizedPassword, user.password);
         if (!isPasswordValid) {
             return res.send({ code: 400, message: '密码错误！' });
         }
@@ -130,16 +194,26 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
 
         // 获取前端填写的发帖内容
         const { title, content, category_id, tags } = req.body;
+        const normalizedTitle = normalizeString(title);
+        const normalizedContent = normalizeString(content);
+        const normalizedCategoryId = toPositiveInt(category_id);
+        const normalizedTags = normalizeOptionalString(tags);
 
         // 简单的防呆校验，标题和内容不能为空
-        if (!title || !content || !category_id) {
+        if (!normalizedTitle || !normalizedContent || !normalizedCategoryId) {
             return res.send({ code: 400, message: '标题、内容和分类都不能为空哦！' });
+        }
+        if (normalizedTitle.length > 100) {
+            return res.send({ code: 400, message: '帖子标题不能超过100个字符' });
+        }
+        if (normalizedTags && normalizedTags.length > 255) {
+            return res.send({ code: 400, message: '标签长度不能超过255个字符' });
         }
 
         // 插入到 posts 数据库表中
         const [result] = await db.query(
             'INSERT INTO posts (title, content, user_id, category_id, tags) VALUES (?, ?, ?, ?, ?)',
-            [title, content, userId, category_id, tags || null]
+            [normalizedTitle, normalizedContent, userId, normalizedCategoryId, normalizedTags]
         );
 
         res.send({
@@ -160,8 +234,8 @@ app.get('/api/posts', async (req, res) => {
         const categoryId = req.query.categoryId || '';
 
         // 👉 [新增] 接收分页参数，默认第1页，每页10条
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
         const offset = (page - 1) * limit; // 计算要跳过多少条数据
 
         let queryParams = [];
@@ -194,8 +268,15 @@ app.get('/api/posts', async (req, res) => {
         // 注意：LIMIT 和 OFFSET 的参数必须放在数组的最后面
         const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
 
-        // 👉 把 total 也一起返回给前端！
-        res.send({ code: 200, message: '获取成功', data: rows, total: total });
+        // 👉 把 total/page/limit 一起返回给前端，统一分页响应格式
+        res.send({
+            code: 200,
+            message: '获取成功',
+            data: rows,
+            total,
+            page,
+            limit
+        });
     } catch (error) {
         console.error('获取帖子失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
@@ -241,14 +322,25 @@ app.get('/api/user/posts', authenticateToken, async (req, res) => {
 app.post('/api/comments', authenticateToken, async (req, res) => {
     try {
         const { post_id, content } = req.body;
-        if (!post_id || !content) {
+        const normalizedPostId = toPositiveInt(post_id);
+        const normalizedContent = normalizeString(content);
+
+        if (!normalizedPostId || !normalizedContent) {
             return res.send({ code: 400, message: '评论内容不能为空！' });
+        }
+        if (normalizedContent.length > 1000) {
+            return res.send({ code: 400, message: '评论内容不能超过1000个字符' });
+        }
+
+        const [targetPosts] = await db.query('SELECT id FROM posts WHERE id = ?', [normalizedPostId]);
+        if (targetPosts.length === 0) {
+            return res.send({ code: 404, message: '评论目标帖子不存在' });
         }
 
         // 插入评论数据
         await db.query(
             'INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)',
-            [post_id, req.user.id, content]
+            [normalizedPostId, req.user.id, normalizedContent]
         );
         res.send({ code: 200, message: '评论发表成功！' });
     } catch (error) {
@@ -260,7 +352,10 @@ app.post('/api/comments', authenticateToken, async (req, res) => {
 // 👉 [新增] 8. 获取某篇帖子的所有评论 (公开接口，大家都能看)
 app.get('/api/comments/:postId', async (req, res) => {
     try {
-        const postId = req.params.postId;
+        const postId = toPositiveInt(req.params.postId);
+        if (!postId) {
+            return res.send({ code: 400, message: '帖子ID格式不正确' });
+        }
         // 联表查询：把评论内容和评论者的昵称、头像一起查出来
         const query = `
             SELECT c.id, c.content, c.created_at, u.nickname, u.avatar
@@ -334,6 +429,9 @@ app.get('/api/study', async (req, res) => {
 app.get('/api/competitions', async (req, res) => {
     try {
         const { status } = req.query; // 允许按“是否满员”筛选
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+        const offset = (page - 1) * limit;
 
         let query = 'SELECT * FROM competitions';
         const queryParams = [];
@@ -343,13 +441,107 @@ app.get('/api/competitions', async (req, res) => {
             queryParams.push(status);
         }
 
-        query += ' ORDER BY created_at DESC';
+        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const [countRows] = await db.query(countQuery, queryParams);
+        const total = countRows[0]?.total || 0;
 
-        const [rows] = await db.query(query, queryParams);
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
 
-        res.send({ code: 200, message: '获取竞赛信息成功', data: rows });
+        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+
+        res.send({
+            code: 200,
+            message: '获取竞赛信息成功',
+            data: rows,
+            total,
+            page,
+            limit
+        });
     } catch (error) {
         console.error('获取竞赛信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 11-2. 发布竞赛组队信息 (需要保安验证)
+app.post('/api/competitions', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // 简易滑动窗口限流（单实例进程有效）
+        const now = Date.now();
+        const userRecords = competitionPublishLimiter.get(userId) || [];
+        const validRecords = userRecords.filter(ts => now - ts < COMPETITION_PUBLISH_WINDOW_MS);
+
+        if (validRecords.length >= COMPETITION_PUBLISH_MAX) {
+            return res.status(429).send({ code: 429, message: '发布太频繁了，请稍后再试' });
+        }
+
+        const {
+            comp_name,
+            title,
+            description,
+            required_skills,
+            contact_info,
+            status
+        } = req.body;
+
+        const trimmedCompName = comp_name ? String(comp_name).trim() : '';
+        const trimmedTitle = title ? String(title).trim() : '';
+        const trimmedDescription = description ? String(description).trim() : '';
+        const trimmedSkills = required_skills ? String(required_skills).trim() : null;
+        const trimmedContact = contact_info ? String(contact_info).trim() : null;
+
+        // 基础参数校验
+        if (!trimmedCompName || !trimmedTitle || !trimmedDescription) {
+            return res.send({ code: 400, message: '竞赛名称、招募口号和项目详情不能为空！' });
+        }
+
+        // 与数据库字段长度对齐，避免超长写入失败
+        if (trimmedCompName.length > 100 || trimmedTitle.length > 100) {
+            return res.send({ code: 400, message: '竞赛名称和招募口号长度不能超过100个字符' });
+        }
+        if (trimmedSkills && trimmedSkills.length > 255) {
+            return res.send({ code: 400, message: '所需技能长度不能超过255个字符' });
+        }
+        if (trimmedContact && trimmedContact.length > 100) {
+            return res.send({ code: 400, message: '联系方式长度不能超过100个字符' });
+        }
+
+        const allowedStatus = ['招募中', '已满员'];
+        const finalStatus = status ? String(status).trim() : '招募中';
+        if (!allowedStatus.includes(finalStatus)) {
+            return res.send({ code: 400, message: '状态值非法，仅支持: 招募中 / 已满员' });
+        }
+
+        validRecords.push(now);
+        competitionPublishLimiter.set(userId, validRecords);
+
+        const [result] = await db.query(
+            `INSERT INTO competitions (comp_name, title, description, required_skills, status, contact_info)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+                trimmedCompName,
+                trimmedTitle,
+                trimmedDescription,
+                trimmedSkills,
+                finalStatus,
+                trimmedContact
+            ]
+        );
+
+        const [createdRows] = await db.query(
+            'SELECT * FROM competitions WHERE id = ?',
+            [result.insertId]
+        );
+
+        res.send({
+            code: 200,
+            message: '竞赛招募发布成功',
+            data: createdRows[0] || { id: result.insertId }
+        });
+    } catch (error) {
+        console.error('发布竞赛招募失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
@@ -380,11 +572,23 @@ app.get('/api/careers', async (req, res) => {
 app.put('/api/user/info', authenticateToken, async (req, res) => {
     try {
         const { nickname, avatar } = req.body;
+        const normalizedNickname = normalizeString(nickname);
+        const normalizedAvatar = normalizeOptionalString(avatar);
+
+        if (!normalizedNickname) {
+            return res.send({ code: 400, message: '昵称不能为空' });
+        }
+        if (normalizedNickname.length > 50) {
+            return res.send({ code: 400, message: '昵称长度不能超过50个字符' });
+        }
+        if (normalizedAvatar && (normalizedAvatar.length > 255 || !isHttpUrl(normalizedAvatar))) {
+            return res.send({ code: 400, message: '头像地址格式不正确' });
+        }
 
         // 更新当前登录用户的资料
         await db.query(
             'UPDATE users SET nickname = ?, avatar = ? WHERE id = ?',
-            [nickname, avatar, req.user.id]
+            [normalizedNickname, normalizedAvatar, req.user.id]
         );
 
         res.send({ code: 200, message: '个人资料更新成功！' });
@@ -398,11 +602,20 @@ app.post('/api/favorites/toggle', authenticateToken, async (req, res) => {
     try {
         const { target_id, target_type = 'post' } = req.body;
         const user_id = req.user.id;
+        const normalizedTargetId = toPositiveInt(target_id);
+        const normalizedTargetType = normalizeString(target_type) || 'post';
+
+        if (!normalizedTargetId) {
+            return res.send({ code: 400, message: '收藏目标ID格式不正确' });
+        }
+        if (!ALLOWED_FAVORITE_TYPES.includes(normalizedTargetType)) {
+            return res.send({ code: 400, message: '收藏类型不支持' });
+        }
 
         // 检查数据库里是否已经有这条收藏记录
         const [existing] = await db.query(
             'SELECT id FROM favorites WHERE user_id = ? AND target_id = ? AND target_type = ?',
-            [user_id, target_id, target_type]
+            [user_id, normalizedTargetId, normalizedTargetType]
         );
 
         if (existing.length > 0) {
@@ -413,7 +626,7 @@ app.post('/api/favorites/toggle', authenticateToken, async (req, res) => {
             // 没查到 -> 执行添加收藏
             await db.query(
                 'INSERT INTO favorites (user_id, target_id, target_type) VALUES (?, ?, ?)',
-                [user_id, target_id, target_type]
+                [user_id, normalizedTargetId, normalizedTargetType]
             );
             res.send({ code: 200, message: '收藏成功！' });
         }
@@ -426,8 +639,12 @@ app.post('/api/favorites/toggle', authenticateToken, async (req, res) => {
 // 👉 [升级版] 16. 获取我的收藏列表 (支持动态传参 type)
 app.get('/api/user/favorites', authenticateToken, async (req, res) => {
     try {
-        const type = req.query.type || 'post'; // 接收前端传来的 type，默认是 post
+        const type = normalizeString(req.query.type || 'post'); // 接收前端传来的 type，默认是 post
         let query = '';
+
+        if (!ALLOWED_FAVORITE_TYPES.includes(type)) {
+            return res.send({ code: 400, message: '收藏分类参数不合法' });
+        }
 
         if (type === 'post') {
             query = `
@@ -485,31 +702,42 @@ app.get('/api/user/favorites', authenticateToken, async (req, res) => {
 });
 // 👉 [新增] 17. 删除自己发布的帖子 (需要保安验证)
 app.delete('/api/posts/:id', authenticateToken, async (req, res) => {
+    const connection = await db.getConnection();
     try {
         const postId = req.params.id;
         const userId = req.user.id;
 
+        await connection.beginTransaction();
+
         // 1. 安全校验：先查一下这篇帖子是不是当前登录用户发的
-        const [posts] = await db.query('SELECT user_id FROM posts WHERE id = ?', [postId]);
+        const [posts] = await connection.query('SELECT user_id FROM posts WHERE id = ?', [postId]);
 
         if (posts.length === 0) {
+            await connection.rollback();
             return res.send({ code: 404, message: '帖子不存在' });
         }
         if (posts[0].user_id !== userId) { // 👉 这里也要改成 user_id
+            await connection.rollback();
             return res.send({ code: 403, message: '你没有权限删除别人的帖子哦！' });
         }
 
-        // 2. 级联清理：先删掉和这篇帖子相关的“收藏记录”和“评论记录”（防止数据库报错）
-        await db.query(`DELETE FROM favorites WHERE target_type = 'post' AND target_id = ?`, [postId]);
-        await db.query(`DELETE FROM comments WHERE post_id = ?`, [postId]);
+        // 2. 级联清理：先删掉和这篇帖子相关的点赞、收藏和评论记录
+        await connection.query('DELETE FROM post_likes WHERE post_id = ?', [postId]);
+        await connection.query(`DELETE FROM favorites WHERE target_type = 'post' AND target_id = ?`, [postId]);
+        await connection.query(`DELETE FROM comments WHERE post_id = ?`, [postId]);
 
         // 3. 终极销毁：最后再把帖子本体删掉
-        await db.query(`DELETE FROM posts WHERE id = ?`, [postId]);
+        await connection.query(`DELETE FROM posts WHERE id = ?`, [postId]);
+
+        await connection.commit();
 
         res.send({ code: 200, message: '帖子已彻底删除' });
     } catch (error) {
+        await connection.rollback();
         console.error('删除帖子失败:', error);
-        res.status(500).send({ code: 500, message: '服务器内部错误' });
+        sendApiError(res, 500);
+    } finally {
+        connection.release();
     }
 });
 // 👉 [新增] 18. 点赞 / 取消点赞
@@ -517,17 +745,27 @@ app.post('/api/likes/toggle', authenticateToken, async (req, res) => {
     try {
         const { post_id } = req.body;
         const user_id = req.user.id;
+        const normalizedPostId = toPositiveInt(post_id);
 
-        const [existing] = await db.query('SELECT id FROM post_likes WHERE user_id = ? AND post_id = ?', [user_id, post_id]);
+        if (!normalizedPostId) {
+            return res.send({ code: 400, message: '帖子ID格式不正确' });
+        }
+
+        const [targetPosts] = await db.query('SELECT id FROM posts WHERE id = ?', [normalizedPostId]);
+        if (targetPosts.length === 0) {
+            return res.send({ code: 404, message: '点赞目标帖子不存在' });
+        }
+
+        const [existing] = await db.query('SELECT id FROM post_likes WHERE user_id = ? AND post_id = ?', [user_id, normalizedPostId]);
 
         if (existing.length > 0) {
             await db.query('DELETE FROM post_likes WHERE id = ?', [existing[0].id]);
             res.send({ code: 200, message: '取消点赞', action: 'removed' });
         } else {
-            await db.query('INSERT INTO post_likes (user_id, post_id) VALUES (?, ?)', [user_id, post_id]);
+            await db.query('INSERT INTO post_likes (user_id, post_id) VALUES (?, ?)', [user_id, normalizedPostId]);
             res.send({ code: 200, message: '点赞成功', action: 'added' });
         }
-    } catch (error) { res.status(500).send({ code: 500, message: '服务器错误' }); }
+    } catch (error) { sendApiError(res, 500); }
 });
 
 // 👉 [新增] 19. 获取当前用户点过赞的帖子 ID 数组
@@ -535,7 +773,7 @@ app.get('/api/user/likes', authenticateToken, async (req, res) => {
     try {
         const [rows] = await db.query('SELECT post_id FROM post_likes WHERE user_id = ?', [req.user.id]);
         res.send({ code: 200, data: rows.map(r => r.post_id) });
-    } catch (error) { res.status(500).send({ code: 500 }); }
+    } catch (error) { sendApiError(res, 500); }
 });
 
 // 👉 [新增] 20. 获取个人数据面板统计 (获赞总数)
@@ -550,7 +788,7 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
         `, [req.user.id]);
 
         res.send({ code: 200, data: { totalLikes: likeRes[0].totalLikes } });
-    } catch (error) { res.status(500).send({ code: 500 }); }
+    } catch (error) { sendApiError(res, 500); }
 });
 
 // 1. 配置磁盘存储
@@ -575,9 +813,11 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     if (!req.file) {
         return res.send({ code: 400, message: '请选择要上传的图片' });
     }
-    // 构建图片在服务器上的访问 URL
-    // 注意：实际开发中这里通常写成相对路径或配置好的域名
-    const imgUrl = `http://localhost:3000/uploads/${req.file.filename}`;
+    if (!req.file.mimetype || !req.file.mimetype.startsWith('image/')) {
+        return res.send({ code: 400, message: '仅支持上传图片文件' });
+    }
+    // 优先使用环境变量中的公网地址，未配置时自动使用当前请求域名
+    const imgUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
     res.send({ code: 200, message: '上传成功', url: imgUrl });
 });
 // 👉 [新增] 账号注销接口 (使用数据库事务)
@@ -591,10 +831,31 @@ app.delete('/api/user/account', authenticateToken, async (req, res) => {
         // 1. 开启事务
         await connection.beginTransaction();
 
+        const [ownedPosts] = await connection.query('SELECT id FROM posts WHERE user_id = ?', [userId]);
+        const ownedPostIds = ownedPosts.map(post => post.id);
+
+        const deletePostRelatedRows = async (tableName, columnName, ids) => {
+            if (!ids || ids.length === 0) {
+                return;
+            }
+
+            const placeholders = ids.map(() => '?').join(', ');
+            await connection.query(
+                `DELETE FROM ${tableName} WHERE ${columnName} IN (${placeholders})`,
+                ids
+            );
+        };
+
         // 2. 依次删除该用户产生的所有关联数据 (注意顺序，从子表到主表)
         await connection.query('DELETE FROM favorites WHERE user_id = ?', [userId]);
         await connection.query('DELETE FROM post_likes WHERE user_id = ?', [userId]);
         await connection.query('DELETE FROM comments WHERE user_id = ?', [userId]);
+
+        // 2.1 删除其他用户对当前用户发布内容产生的关联数据，避免残留脏数据
+        await deletePostRelatedRows('favorites', 'target_id', ownedPostIds);
+        await deletePostRelatedRows('comments', 'post_id', ownedPostIds);
+        await deletePostRelatedRows('post_likes', 'post_id', ownedPostIds);
+
         await connection.query('DELETE FROM posts WHERE user_id = ?', [userId]);
 
         // 3. 最后，删除用户本体
@@ -607,11 +868,20 @@ app.delete('/api/user/account', authenticateToken, async (req, res) => {
         // ❌ 如果中间任何一步报错，立刻回滚撤销，仿佛什么都没发生过
         await connection.rollback();
         console.error('注销账号失败:', error);
-        res.status(500).send({ code: 500, message: '服务器内部错误' });
+        sendApiError(res, 500);
     } finally {
         // 释放连接回到连接池
         connection.release();
     }
+});
+
+// 全局兜底：统一返回未捕获异常，避免前端出现静默失败
+app.use((err, req, res, next) => {
+    console.error('未处理异常:', err);
+    if (res.headersSent) {
+        return next(err);
+    }
+    return sendApiError(res, err?.status || 500, err?.message);
 });
 
 const PORT = process.env.PORT || 3000;

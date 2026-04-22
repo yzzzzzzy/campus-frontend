@@ -7,7 +7,7 @@
 
       <el-main class="main-content">
         <div class="filter-bar">
-          <el-radio-group v-model="activeStatus" @change="fetchCompetitions">
+          <el-radio-group v-model="activeStatus" @change="handleStatusChange">
             <el-radio-button label="">全部组队</el-radio-button>
             <el-radio-button label="招募中">🔥 招募中</el-radio-button>
             <el-radio-button label="已满员">✅ 已满员</el-radio-button>
@@ -68,6 +68,19 @@
         </el-row>
 
         <el-empty v-if="compList.length === 0" description="暂无组队信息" />
+
+        <div class="pagination-container" v-if="totalCompetitions > 0">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[6, 10, 20, 50]"
+            background
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="totalCompetitions"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+          />
+        </div>
       </el-main>
 
       <el-dialog v-model="dialogVisible" title="🏆 发布竞赛招募" width="50%">
@@ -100,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -109,6 +122,19 @@ import NavBar from '../components/NavBar.vue'
 const router = useRouter()
 const activeStatus = ref('')
 const compList = ref([])
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalCompetitions = ref(0)
+const isPageActive = ref(true)
+const syncFavoriteIds = (targetId, shouldInclude) => {
+  const ids = new Set(myFavoriteIds.value)
+  if (shouldInclude) {
+    ids.add(targetId)
+  } else {
+    ids.delete(targetId)
+  }
+  myFavoriteIds.value = Array.from(ids)
+}
 // 👉 [新增] 弹窗可见性与表单数据
 const dialogVisible = ref(false)
 const compForm = ref({
@@ -124,21 +150,46 @@ const myFavoriteIds = ref([])
 const fetchMyFavorites = async () => {
   try {
     const res = await request.get('/api/user/favorites', { params: { type: 'competition' } })
+    if (!isPageActive.value) return
     if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
   } catch (error) { }
 }
 
 const fetchCompetitions = async () => {
   try {
-    const res = await request.get('/api/competitions', { params: { status: activeStatus.value } })
+    const res = await request.get('/api/competitions', {
+      params: {
+        status: activeStatus.value,
+        page: currentPage.value,
+        limit: pageSize.value
+      }
+    })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 👉 注入收藏状态
       compList.value = res.data.data.map(item => ({
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
       }))
+      totalCompetitions.value = res.data.total || 0
     }
   } catch (error) { ElMessage.error('获取组队列表失败') }
+}
+
+const handleStatusChange = () => {
+  currentPage.value = 1
+  fetchCompetitions()
+}
+
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+  fetchCompetitions()
+}
+
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  fetchCompetitions()
 }
 // 👉 [新增] 提交竞赛招募的方法
 const submitCompetition = async () => {
@@ -149,20 +200,36 @@ const submitCompetition = async () => {
   
   try {
     const res = await request.post('/api/competitions', compForm.value)
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success('招募发布成功！')
       dialogVisible.value = false // 关闭弹窗
-      
+
+      const createdItem = {
+        ...res.data.data,
+        is_favorited: false
+      }
+
+      // 无感更新：在第一页时直接插入，避免每次都整页刷新
+      if (currentPage.value === 1 && (!activeStatus.value || activeStatus.value === createdItem.status)) {
+        compList.value.unshift(createdItem)
+        if (compList.value.length > pageSize.value) {
+          compList.value.pop()
+        }
+        totalCompetitions.value += 1
+      } else {
+        currentPage.value = 1
+        await fetchCompetitions()
+      }
+
       // 清空表单数据，为下次发布做准备
       compForm.value = { comp_name: '', title: '', required_skills: '', contact_info: '', description: '' }
-      
-      // 重新拉取一次列表，让新发的招募立马显示在页面上！
-      fetchCompetitions()
     } else {
       ElMessage.error(res.data.message)
     }
   } catch (error) {
-    ElMessage.error('发布失败，请检查登录状态')
+    const msg = error?.response?.data?.message || '发布失败，请检查登录状态'
+    ElMessage.error(msg)
   }
 }
 
@@ -172,9 +239,12 @@ const handleFavorite = async (item) => {
       target_id: item.id,
       target_type: 'competition'
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success(res.data.message)
-      item.is_favorited = !item.is_favorited
+      const nextFavorited = !item.is_favorited
+      item.is_favorited = nextFavorited
+      syncFavoriteIds(item.id, nextFavorited)
     }
   } catch (error) { ElMessage.error('操作失败') }
 }
@@ -182,6 +252,10 @@ const handleFavorite = async (item) => {
 onMounted(async () => {
   await fetchMyFavorites()
   await fetchCompetitions()
+})
+
+onUnmounted(() => {
+  isPageActive.value = false
 })
 </script>
 
@@ -206,6 +280,12 @@ onMounted(async () => {
   background: white;
   padding: 15px 20px;
   border-radius: 8px;
+}
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+  padding-bottom: 8px;
 }
 .comp-col {
   margin-bottom: 20px;

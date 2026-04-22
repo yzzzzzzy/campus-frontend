@@ -86,12 +86,17 @@ const handleRegister = async () => {
 
 // 🎨 Canvas 粒子系统逻辑 (调整为白蓝色调)
 let animationFrame
+let resizeHandler = null
 const initParticles = () => {
   const canvas = particleCanvas.value
+  if (!canvas) return
+
   const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
   let particles = []
-  
-  const resize = () => {
+
+  resizeHandler = () => {
     canvas.width = window.innerWidth
     canvas.height = window.innerHeight
   }
@@ -144,15 +149,21 @@ const initParticles = () => {
     animationFrame = requestAnimationFrame(animate)
   }
 
-  window.addEventListener('resize', resize)
-  resize()
+  window.addEventListener('resize', resizeHandler)
+  resizeHandler()
   animate()
 }
 
 onMounted(() => initParticles())
 onUnmounted(() => {
-  cancelAnimationFrame(animationFrame)
-  window.removeEventListener('resize', () => {})
+  if (animationFrame) {
+    cancelAnimationFrame(animationFrame)
+    animationFrame = null
+  }
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
+  }
 })
 </script>
 

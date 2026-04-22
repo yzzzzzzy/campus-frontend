@@ -89,7 +89,7 @@
                       <el-form-item label="修改头像">
                         <el-upload
                         class="avatar-uploader"
-                        action="http://localhost:3000/api/upload"  :show-file-list="false"
+                        :action="uploadAction"  :show-file-list="false"
                         :on-success="handleAvatarSuccess"
                         :on-error="handleAvatarError"
                         :before-upload="beforeAvatarUpload"
@@ -124,8 +124,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import request from '../utils/request'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import request, { API_BASE_URL } from '../utils/request'
 import NavBar from '../components/NavBar.vue' // 👉 引入通用导航栏组件
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -138,11 +138,14 @@ const myFavorites = ref([]) // 👉 [新增] 我的收藏列表
 const favoriteType = ref('post') // 👉 [新增] 收藏类型
 const activeTab = ref('posts')
 const userStats = ref({ totalLikes: 0 }) // 👉 [新增] 存放统计数据
+const uploadAction = `${API_BASE_URL}/api/upload`
+const isPageActive = ref(true)
 
 // 👉 [新增] 拉取获赞统计
 const fetchUserStats = async () => {
   try {
     const res = await request.get('/api/user/stats')
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       userStats.value.totalLikes = res.data.data.totalLikes
     }
@@ -161,6 +164,7 @@ const settingsForm = ref({
 const fetchUserInfo = async () => {
   try {
     const res = await request.get('/api/user/info')
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       userInfo.value = res.data.data
       
@@ -191,6 +195,7 @@ const isSaveDisabled = computed(() => {
 const fetchMyPosts = async () => {
   try {
     const res = await request.get('/api/user/posts')
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       myPosts.value = res.data.data
     }
@@ -207,6 +212,7 @@ const saveSettings = async () => {
       // 👉 [核心修改] 如果右边表单里有新头像，就用新的；如果是空的，就用左边名片里原本的头像！
       avatar: settingsForm.value.avatar || userInfo.value.avatar
     })
+    if (!isPageActive.value) return
     
     if (res.data.code === 200) {
       ElMessage.success('个人资料已更新！')
@@ -235,6 +241,7 @@ const fetchMyFavorites = async () => {
     const res = await request.get('/api/user/favorites', {
       params: { type: favoriteType.value } // 传参给后端！
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       myFavorites.value = res.data.data
     }
@@ -298,6 +305,7 @@ const uploadHeaders = {
 
 // 上传成功的回调
 const handleAvatarSuccess = (response) => {
+  if (!isPageActive.value) return
   console.log('后端返回的数据:', response) // 打印出来看！
   
   if (response.code === 200) {
@@ -367,6 +375,10 @@ onMounted(() => {
   if (route.query.tab === 'favorites') {
     activeTab.value = 'favorites' // 直接激活收藏标签页！
   }
+})
+
+onUnmounted(() => {
+  isPageActive.value = false
 })
 
 </script>

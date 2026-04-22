@@ -126,7 +126,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -144,11 +144,23 @@ const myFavoriteIds = ref([]) // 用来存当前用户收藏过的帖子 ID
 const currentPage = ref(1)   // 当前页码
 const pageSize = ref(10)     // 每页显示几条
 const totalPosts = ref(0)    // 总帖子数
+const isPageActive = ref(true)
+
+const syncIdList = (idsRef, targetId, shouldInclude) => {
+  const currentIds = new Set(idsRef.value)
+  if (shouldInclude) {
+    currentIds.add(targetId)
+  } else {
+    currentIds.delete(targetId)
+  }
+  idsRef.value = Array.from(currentIds)
+}
 
 // 👉 [新增] 获取用户所有的收藏记录 ID
 const fetchMyFavorites = async () => {
   try {
     const res = await request.get('/api/user/favorites')
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 把查到的收藏帖子的 ID 提取出来存进数组
       myFavoriteIds.value = res.data.data.map(item => item.id)
@@ -169,6 +181,7 @@ const fetchPosts = async () => {
         limit: pageSize.value
       }
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       postList.value = res.data.data.map(post => ({
         ...post,
@@ -176,7 +189,10 @@ const fetchPosts = async () => {
         is_liked: myLikedIds.value.includes(post.id),
       }))
       // 👉 关键：接收后端传来的总条数，喂给分页器
-      totalPosts.value = res.data.total
+      totalPosts.value = res.data.total || 0
+      // 与后端规范化分页参数对齐（后端会自动做边界修正）
+      currentPage.value = res.data.page || currentPage.value
+      pageSize.value = res.data.limit || pageSize.value
     }
   } catch (error) { console.error('获取帖子失败') }
 }
@@ -184,6 +200,7 @@ const fetchPosts = async () => {
 const fetchCategories = async () => {
   try {
     const res = await request.get('/api/categories')
+    if (!isPageActive.value) return
     if (res.data.code === 200) categoryList.value = res.data.data
   } catch (error) { console.error('获取分类失败') }
 }
@@ -213,6 +230,7 @@ const submitPost = async () => {
   }
   try {
     const res = await request.post('/api/posts', postForm.value)
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success('发布成功！')
       dialogVisible.value = false
@@ -226,6 +244,7 @@ const toggleComments = async (post) => {
   if (!post.showComments) {
     try {
       const res = await request.get(`/api/comments/${post.id}`)
+      if (!isPageActive.value) return
       if (res.data.code === 200) post.commentsList = res.data.data
     } catch (error) { ElMessage.error('获取评论失败') }
   }
@@ -236,10 +255,12 @@ const submitComment = async (post) => {
   if (!post.newComment) return ElMessage.warning('评论内容不能为空哦！')
   try {
     const res = await request.post('/api/comments', { post_id: post.id, content: post.newComment })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success('评论成功！')
       post.newComment = ''
       const commentsRes = await request.get(`/api/comments/${post.id}`)
+      if (!isPageActive.value) return
       post.commentsList = commentsRes.data.data
     }
   } catch (error) { ElMessage.error('评论失败') }
@@ -252,10 +273,13 @@ const handleFavorite = async (post) => {
       target_id: post.id,
       target_type: 'post'
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success(res.data.message)
       // 👉 [重点修改] 手动切换前端状态，让星星立刻变色！
-      post.is_favorited = !post.is_favorited
+      const nextFavorited = !post.is_favorited
+      post.is_favorited = nextFavorited
+      syncIdList(myFavoriteIds, post.id, nextFavorited)
     }
   } catch (error) {
     ElMessage.error('操作失败，请检查是否登录')
@@ -267,6 +291,7 @@ const myLikedIds = ref([]) // 存用户点过赞的 ID
 const fetchMyLikes = async () => {
   try {
     const res = await request.get('/api/user/likes')
+    if (!isPageActive.value) return
     if (res.data.code === 200) myLikedIds.value = res.data.data
   } catch (error) {}
 }
@@ -275,14 +300,17 @@ const fetchMyLikes = async () => {
 const handleLike = async (post) => {
   try {
     const res = await request.post('/api/likes/toggle', { post_id: post.id })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 乐观更新：前端直接修改状态和数字，不刷新网页
       if (res.data.action === 'added') {
         post.is_liked = true
         post.likes_count = (post.likes_count || 0) + 1
+        syncIdList(myLikedIds, post.id, true)
       } else {
         post.is_liked = false
         post.likes_count = Math.max(0, (post.likes_count || 1) - 1)
+        syncIdList(myLikedIds, post.id, false)
       }
     }
   } catch (error) { ElMessage.error('点赞失败') }
@@ -293,6 +321,10 @@ onMounted(async () => { // 👉 关键修复：在这里加上 async
   await fetchMyLikes()       // 先等点赞列表拉取完
   await fetchMyFavorites()   // 再等收藏列表拉取完
   await fetchPosts()         // 最后再拉取帖子列表，这样状态才准！
+})
+
+onUnmounted(() => {
+  isPageActive.value = false
 })
 </script>
 

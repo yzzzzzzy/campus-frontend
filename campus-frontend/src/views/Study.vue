@@ -56,7 +56,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -66,11 +66,23 @@ const router = useRouter()
 const activeCategory = ref('')
 const studyList = ref([])
 const myFavoriteIds = ref([])
+const isPageActive = ref(true)
+
+const syncFavoriteIds = (targetId, shouldInclude) => {
+  const ids = new Set(myFavoriteIds.value)
+  if (shouldInclude) {
+    ids.add(targetId)
+  } else {
+    ids.delete(targetId)
+  }
+  myFavoriteIds.value = Array.from(ids)
+}
 
 // 1. 获取用户在 study 模块的收藏记录
 const fetchMyFavorites = async () => {
   try {
     const res = await request.get('/api/user/favorites', { params: { type: 'study' } }) // 明确告诉后端查 study
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       myFavoriteIds.value = res.data.data.map(item => item.id)
     }
@@ -79,6 +91,7 @@ const fetchMyFavorites = async () => {
 const fetchStudyMaterials = async (category = '') => {
   try {
     const res = await request.get('/api/study', { params: { category: category } })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 遍历资料，比对收藏 ID
       studyList.value = res.data.data.map(item => ({
@@ -105,9 +118,12 @@ const handleFavorite = async (item) => {
       target_id: item.id,
       target_type: 'study' // 👉 关键：告诉后端我这次收藏的是资料
     })
+    if (!isPageActive.value) return
     if (res.data.code === 200) {
       ElMessage.success(res.data.message)
-      item.is_favorited = !item.is_favorited // 前端秒切状态
+      const nextFavorited = !item.is_favorited
+      item.is_favorited = nextFavorited // 前端秒切状态
+      syncFavoriteIds(item.id, nextFavorited)
     }
   } catch (error) { ElMessage.error('操作失败') }
 }
@@ -115,6 +131,10 @@ const handleFavorite = async (item) => {
 onMounted(async () => {
   await fetchMyFavorites()
   await fetchStudyMaterials()
+})
+
+onUnmounted(() => {
+  isPageActive.value = false
 })
 </script>
 
