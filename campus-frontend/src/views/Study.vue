@@ -7,13 +7,26 @@
       
 
       <el-main class="main-content">
-        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #409EFF;">
-          <el-tabs v-model="activeCategory" class="category-tabs unified-tabs" @tab-change="fetchStudyMaterials">
+        <div class="filter-container">
+          
+          <el-tabs v-model="activeCategory" class="category-tabs" @tab-change="fetchStudyMaterials">
             <el-tab-pane label="全部资料" name=""></el-tab-pane>
-            <el-tab-pane label="考研资料" name="考研资料"></el-tab-pane>
-            <el-tab-pane label="考公资料" name="考公资料"></el-tab-pane>
-            <el-tab-pane label="四六级" name="四六级"></el-tab-pane>
+            <el-tab-pane label="📚 考研资料" name="考研资料"></el-tab-pane>
+            <el-tab-pane label="💼 考公资料" name="考公资料"></el-tab-pane>
+            <el-tab-pane label="💯 四六级" name="四六级"></el-tab-pane>
           </el-tabs>
+          
+          <div style="display: flex; align-items: center;">
+            <el-input 
+              v-model="searchQuery" 
+              placeholder="搜索考研/公考/四六级资料..." 
+              prefix-icon="Search"
+              clearable
+              @clear="fetchStudyMaterials"
+              @keyup.enter="fetchStudyMaterials"
+              style="width: 250px;"
+            />
+          </div>
         </div>
 
         <el-card shadow="hover" class="list-card">
@@ -66,9 +79,11 @@ import NavBar from '../components/NavBar.vue'
 
 const router = useRouter()
 const activeCategory = ref('')
+const searchQuery = ref('')
 const studyList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
+
 
 const syncFavoriteIds = (targetId, shouldInclude) => {
   const ids = new Set(myFavoriteIds.value)
@@ -92,7 +107,7 @@ const fetchMyFavorites = async () => {
 }
 const fetchStudyMaterials = async () => {
   try {
-    const res = await request.get('/api/study', { params: { category: activeCategory.value } })
+    const res = await request.get('/api/study', { params: { category: activeCategory.value, keyword: searchQuery.value } })
     if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 遍历资料，比对收藏 ID
@@ -150,14 +165,7 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 15%; /* 列表模式两边留白多一点更好看 */
 }
-/* 👉 全站统一的控制区样式 */
-.filter-container {
-  margin-bottom: 25px;
-}
 
-.category-tabs {
-  flex: 1; /* 让标签页自动占满左侧空间 */
-}
 .list-card {
   border-radius: 8px;
 }

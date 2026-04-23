@@ -35,17 +35,23 @@
                 <el-tab-pane label="📝 我的发布" name="posts">
                   <el-empty v-if="myPosts.length === 0" description="你还没有发布过帖子哦~" />
                   
-                  <div v-for="post in myPosts" :key="post.id" class="my-post-item">
+                  <div v-for="post in myPosts" :key="post.item_type + post.id" class="my-post-item">
                     <div class="post-header">
-                      <h4>{{ post.title }}</h4>
-                      <el-tag type="success" size="small">{{ post.category_name }}</el-tag>
+                      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                        <h4 style="margin: 0;">{{ post.title }}</h4>
+                        <el-tag :type="post.item_type === 'post' ? '' : (post.item_type === 'career' ? 'warning' : 'success')" size="small">
+                          {{ post.item_type === 'post' ? '论坛帖子' : (post.item_type === 'career' ? '实习面经' : '竞赛招募') }}
+                        </el-tag>
+                        <el-tag type="info" effect="plain" size="small">{{ post.category_name }}</el-tag>
+                      </div>
                     </div>
                     <p class="post-content">{{ post.content }}</p>
                     
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
                       <span class="post-time">发布于: {{ new Date(post.created_at).toLocaleString() }}</span>
-                      <el-button type="danger" link icon="Delete" @click="handleDeletePost(post.id)">
-                        删除帖子
+                      
+                      <el-button type="danger" link icon="Delete" @click="handleDeletePost(post)">
+                        删除
                       </el-button>
                     </div>
                   </div>
@@ -320,39 +326,32 @@ const handleUnfavorite = async (itemId) => {
     }
   } catch (error) { ElMessage.error('操作失败') }
 }
-// 👉 [新增] 安全删除我的帖子
-const handleDeletePost = async (postId) => {
+// 👉 [智能升级版] 安全删除我的发布（支持多种类型）
+const handleDeletePost = async (post) => {
   try {
-    // 1. 弹出二次确认框，防止手抖误删
-    await ElMessageBox.confirm(
-      '确定要永久删除这篇帖子吗？相关的评论和收藏也会被一并清空哦！',
-      '⚠️ 删除确认',
-      {
-        confirmButtonText: '残忍删除',
-        cancelButtonText: '手滑了',
-        type: 'warning',
-      }
-    )
+    await ElMessageBox.confirm('确定要永久删除这条发布吗？相关的评论和收藏也会被一并清空哦！', '⚠️ 删除确认', {
+      confirmButtonText: '残忍删除',
+      cancelButtonText: '手滑了',
+      type: 'warning',
+    })
 
-    // 2. 如果用户点了“残忍删除”，就会执行下面的发请求逻辑
-    const res = await request.delete(`/api/posts/${postId}`)
+    // 根据后端打上的标签，决定请求哪个接口
+    let url = '';
+    if (post.item_type === 'post') url = `/api/posts/${post.id}`;
+    else if (post.item_type === 'career') url = `/api/careers/${post.id}`;
+    else if (post.item_type === 'competition') url = `/api/competitions/${post.id}`;
+
+    const res = await request.delete(url)
     
     if (res.data.code === 200) {
-      ElMessage.success('帖子已彻底删除')
-      
-      // 3. 无感移除：直接用 JS 从数组里剔除这篇帖子
-      myPosts.value = myPosts.value.filter(post => post.id !== postId)
-      
-      // 注意：左侧个人名片里的“发帖数”绑定的是 myPosts.length，
-      // 所以你从数组剔除后，左边卡片上的数字也会自动减 1，极其丝滑！
+      ElMessage.success('内容已彻底删除')
+      // 从列表中精准剔除（因为不同表的 id 可能会重复，所以必须把 type 和 id 连起来比对才安全）
+      myPosts.value = myPosts.value.filter(p => !(p.id === post.id && p.item_type === post.item_type))
     } else {
       ElMessage.error(res.data.message)
     }
   } catch (error) {
-    // 如果用户点了“手滑了”取消操作，或者关掉弹窗，会走到这里，我们什么都不用做
-    if (error !== 'cancel') {
-      ElMessage.error('网络请求失败')
-    }
+    if (error !== 'cancel') ElMessage.error('网络请求失败')
   }
 }
 // 准备上传所需的请求头（因为我们后端有 JWT 校验）
