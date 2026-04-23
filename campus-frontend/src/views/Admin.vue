@@ -33,6 +33,10 @@
             <el-icon><Document /></el-icon>
             <span>内容审核</span>
           </el-menu-item>
+          <el-menu-item index="resetRequests">
+            <el-icon><ChatDotSquare /></el-icon>
+            <span>密码申诉</span>
+          </el-menu-item>
         </el-menu>
 
         <div class="aside-footer">
@@ -128,18 +132,23 @@
                     />
                   </template>
                 </el-table-column>
-                <el-table-column label="操作" width="120" fixed="right">
+                <el-table-column label="操作" width="220" fixed="right">
                   <template #default="scope">
-                    <el-button size="small" type="danger" plain @click="toggleUserStatusQuick(scope.row)">
-                      {{ Number(scope.row.status) === 1 ? '封禁' : '解封' }}
-                    </el-button>
+                    <div class="user-actions">
+                      <el-button size="small" type="danger" plain @click="toggleUserStatusQuick(scope.row)">
+                        {{ Number(scope.row.status) === 1 ? '封禁' : '解封' }}
+                      </el-button>
+                      <el-button size="small" type="warning" plain @click="handleResetUserPassword(scope.row)">
+                        重置密码
+                      </el-button>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
             </el-card>
           </section>
 
-          <section v-else class="table-section">
+          <section v-else-if="activeSection === 'posts'" class="table-section">
             <el-card class="panel-card" shadow="never">
               <template #header>
                 <div class="panel-header">
@@ -168,6 +177,57 @@
               </el-table>
             </el-card>
           </section>
+
+          <section v-else class="table-section">
+            <el-card class="panel-card" shadow="never">
+              <template #header>
+                <div class="panel-header">
+                  <span>找回密码留言</span>
+                  <div class="inline-actions">
+                    <el-input v-model="resetRequestFilters.keyword" placeholder="按账号或留言关键字搜索" clearable class="search-input" />
+                    <el-select v-model="resetRequestFilters.status" placeholder="处理状态" clearable class="filter-select">
+                      <el-option label="待处理" value="pending" />
+                      <el-option label="已处理" value="processed" />
+                    </el-select>
+                    <el-button type="primary" @click="loadResetRequests" :loading="resetRequestsLoading">搜索</el-button>
+                  </div>
+                </div>
+              </template>
+
+              <el-table :data="resetRequests" v-loading="resetRequestsLoading" stripe class="data-table" :row-key="row => row.id">
+                <el-table-column prop="username" label="账号" min-width="130" />
+                <el-table-column label="留言内容" min-width="260">
+                  <template #default="scope">
+                    <div class="request-message">{{ scope.row.message }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="created_at" label="提交时间" min-width="180" />
+                <el-table-column label="状态" width="100">
+                  <template #default="scope">
+                    <el-tag :type="scope.row.status === 'processed' ? 'success' : 'warning'" effect="dark">
+                      {{ scope.row.status === 'processed' ? '已处理' : '待处理' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="admin_note" label="处理备注" min-width="160" show-overflow-tooltip />
+                <el-table-column label="操作" width="180" fixed="right">
+                  <template #default="scope">
+                    <div class="user-actions">
+                      <el-button
+                        size="small"
+                        type="success"
+                        plain
+                        :disabled="scope.row.status === 'processed'"
+                        @click="handleProcessResetRequest(scope.row)"
+                      >
+                        标记已处理
+                      </el-button>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </el-card>
+          </section>
         </el-main>
       </el-container>
     </el-container>
@@ -185,6 +245,7 @@ const activeSection = ref('overview')
 const loading = ref(false)
 const usersLoading = ref(false)
 const postsLoading = ref(false)
+const resetRequestsLoading = ref(false)
 const currentUser = ref(JSON.parse(localStorage.getItem('user') || 'null'))
 
 const stats = ref({
@@ -198,6 +259,7 @@ const stats = ref({
 
 const users = ref([])
 const posts = ref([])
+const resetRequests = ref([])
 
 const userFilters = reactive({
   keyword: '',
@@ -209,11 +271,17 @@ const postFilters = reactive({
   username: ''
 })
 
+const resetRequestFilters = reactive({
+  keyword: '',
+  status: ''
+})
+
 const sectionTitle = computed(() => {
   const mapping = {
     overview: '数据看板',
     users: '用户管理',
-    posts: '内容审核'
+    posts: '内容审核',
+    resetRequests: '密码申诉'
   }
   return mapping[activeSection.value] || '管理员后台'
 })
@@ -286,6 +354,26 @@ const loadPosts = async () => {
   }
 }
 
+const loadResetRequests = async () => {
+  resetRequestsLoading.value = true
+  try {
+    const res = await request.get('/api/admin/password-reset-requests', {
+      params: {
+        keyword: resetRequestFilters.keyword,
+        status: resetRequestFilters.status
+      }
+    })
+    if (res.data.code === 200) {
+      resetRequests.value = res.data.data
+    }
+  } catch (error) {
+    resetRequests.value = []
+    handleAdminApiError(error)
+  } finally {
+    resetRequestsLoading.value = false
+  }
+}
+
 const handleAdminApiError = (error) => {
   const status = error?.response?.status
   if (status === 404) {
@@ -306,7 +394,7 @@ const handleAdminApiError = (error) => {
 const refreshAll = async () => {
   loading.value = true
   try {
-    await Promise.all([loadStats(), loadUsers(), loadPosts()])
+    await Promise.all([loadStats(), loadUsers(), loadPosts(), loadResetRequests()])
     ElMessage.success('数据已刷新')
   } catch (error) {
     handleAdminApiError(error)
@@ -331,6 +419,31 @@ const toggleUserStatusQuick = async (user) => {
   await handleUserStatusToggle(user, nextStatus === 1)
 }
 
+const handleResetUserPassword = async (user) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认将用户 ${user.username} 的密码重置为默认密码 123456 吗？`,
+      '重置密码确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认重置',
+        cancelButtonText: '取消'
+      }
+    )
+
+    const res = await request.post(`/api/admin/users/${user.id}/reset-password`)
+    if (res.data.code === 200) {
+      ElMessage.success(`已重置 ${user.username} 的密码为 123456`)
+    } else {
+      ElMessage.error(res.data.message || '重置密码失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error?.response?.data?.message || '重置密码失败')
+    }
+  }
+}
+
 const handleDeletePost = async (post) => {
   try {
     await ElMessageBox.confirm(
@@ -348,6 +461,36 @@ const handleDeletePost = async (post) => {
   } catch (error) {
     if (error !== 'cancel') {
       await loadPosts()
+    }
+  }
+}
+
+const handleProcessResetRequest = async (requestItem) => {
+  try {
+    await ElMessageBox.confirm(
+      `确认已处理账号 ${requestItem.username} 的找回密码请求吗？`,
+      '处理确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认',
+        cancelButtonText: '取消'
+      }
+    )
+
+    const res = await request.patch(`/api/admin/password-reset-requests/${requestItem.id}`, {
+      status: 'processed',
+      adminNote: '管理员已重置密码为默认值 123456'
+    })
+
+    if (res.data.code === 200) {
+      ElMessage.success('已标记为已处理')
+      await loadResetRequests()
+    } else {
+      ElMessage.error(res.data.message || '更新处理状态失败')
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error?.response?.data?.message || '更新处理状态失败')
     }
   }
 }
@@ -610,6 +753,18 @@ onMounted(async () => {
   --el-table-row-hover-bg-color: rgba(59, 130, 246, 0.08);
   --el-table-text-color: #edf4ff;
   --el-table-header-text-color: rgba(229, 238, 252, 0.75);
+}
+
+.user-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.request-message {
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 :deep(.el-table),
