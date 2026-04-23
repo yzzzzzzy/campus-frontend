@@ -22,3 +22,5 @@ INSERT INTO `careers` (`company`, `title`, `type`, `content`, `tags`, `contact`)
 ('字节跳动', '前端开发实习生（可转正）- 抖音电商', '实习机会', '主要负责抖音电商C端核心业务的开发。要求熟悉 HTML/CSS/JS，了解 React 或 Vue 框架。团队氛围好，有大佬带。', '免费三餐,租房补贴,弹性工作', 'hr_intern@bytedance.com'),
 ('腾讯', '2026届校招内推 - 微信事业群 (WXG)', '校招内推', '微信团队直招，全岗位可推（开发、产品、设计、运营）。使用我的内推码投递，简历免筛选直达笔试/面试！', '大牛云集,海量并发,顶薪', '内推码: TX2026WX'),
 ('美团', '美团后端开发（Java）一二面+HR面 详细面经', '面试经验', '昨天刚拿到 Offer 来还愿！一面主要问了 Java 基础和并发编程，手撕了一道动态规划；二面重点问了 MySQL 索引优化和 Redis 缓存穿透。整体感觉面试官体验很好。', 'Java,后端面经,已拿Offer', '无需投递');
+
+ALTER TABLE careers ADD COLUMN user_id INT;

@@ -41,15 +41,26 @@
       </el-dialog>
 
       <el-main class="main-content">
-        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #E6A23C;">
-          <el-tabs v-model="activeType" class="category-tabs unified-tabs" @tab-change="fetchCareers">
+        <div class="filter-container">
+          <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchCareers">
             <el-tab-pane label="全部信息" name=""></el-tab-pane>
             <el-tab-pane label="🚀 校招内推" name="校招内推"></el-tab-pane>
             <el-tab-pane label="💻 实习机会" name="实习机会"></el-tab-pane>
             <el-tab-pane label="📝 面试经验" name="面试经验"></el-tab-pane>
           </el-tabs>
           
-          <el-button type="warning" @click="publishDialogVisible = true" icon="EditPen">分享面经</el-button>
+          <div style="display: flex; gap: 15px; align-items: center;">
+            <el-input 
+              v-model="searchQuery" 
+              placeholder="搜索公司、岗位或面经..." 
+              prefix-icon="Search"
+              clearable
+              @clear="fetchCareers"
+              @keyup.enter="fetchCareers"
+              style="width: 220px;"
+            />
+            <el-button type="warning" @click="publishDialogVisible = true" icon="EditPen">分享面经</el-button>
+          </div>
         </div>
 
         <el-row :gutter="20">
@@ -106,7 +117,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
@@ -114,6 +125,7 @@ import NavBar from '../components/NavBar.vue'
 
 const router = useRouter()
 const activeType = ref('')
+const searchQuery = ref('') // 👉 [新增] 用来存放搜索框里输入的文字
 const careerList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
@@ -145,10 +157,16 @@ const fetchMyFavorites = async () => {
 }
 const fetchCareers = async () => {
   try {
-    const res = await request.get('/api/careers', { params: { type: activeType.value } })
+    // 👉 [修改] 在请求参数里，把 type 和 keyword 一起发给后端
+    const res = await request.get('/api/careers', { 
+      params: { 
+        type: activeType.value,
+        keyword: searchQuery.value 
+      } 
+    })
+    
     if (!isPageActive.value) return
     if (res.data.code === 200) {
-      // 合并 is_favorited 状态
       careerList.value = res.data.data.map(item => ({
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
@@ -174,6 +192,7 @@ const handleApply = (contact) => {
     type: 'info',
   })
 }
+
 // 👉 [新增] 3. 收藏点击事件
 const handleFavorite = async (item) => {
   try {
@@ -225,6 +244,8 @@ const handlePublishExperience = async () => {
   }
 }
 
+
+
 onMounted(async () => {
   await fetchMyFavorites()
   await fetchCareers()
@@ -250,14 +271,7 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 15%; /* 列表布局，两边留白多一点 */
 }
-/* 👉 全站统一的控制区样式 */
-.filter-container {
-  margin-bottom: 25px;
-}
 
-.category-tabs {
-  flex: 1; /* 让标签页自动占满左侧空间 */
-}
 
 .action-btn-group {
   margin-left: 20px;

@@ -7,13 +7,26 @@
       
 
       <el-main class="main-content">
-        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #9C27B0;">
-          <el-tabs v-model="activeType" class="category-tabs unified-tabs" @tab-change="fetchResources">
+        <div class="filter-container">
+          
+          <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchResources">
             <el-tab-pane label="全部资源" name=""></el-tab-pane>
             <el-tab-pane label="💻 编程开发" name="编程开发"></el-tab-pane>
             <el-tab-pane label="🎨 创意设计" name="创意设计"></el-tab-pane>
             <el-tab-pane label="📊 办公效率" name="办公效率"></el-tab-pane>
           </el-tabs>
+
+          <div style="display: flex; align-items: center;">
+            <el-input 
+              v-model="searchQuery" 
+              placeholder="搜索技能提升资源..." 
+              prefix-icon="Search"
+              clearable
+              @clear="fetchResources"
+              @keyup.enter="fetchResources"
+              style="width: 250px;"
+            />
+          </div>
         </div>
 
         <el-row :gutter="20">
@@ -66,6 +79,7 @@ import NavBar from '../components/NavBar.vue'
 
 const router = useRouter()
 const activeType = ref('') // 当前选中的分类，空字符串代表全部
+const searchQuery = ref('') // 👉 [新增] 声明搜索框绑定的变量
 const resourceList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
@@ -92,10 +106,16 @@ const fetchMyFavorites = async () => {
 // 获取资源列表的方法，支持传入分类参数
 const fetchResources = async () => {
   try {
-    const res = await request.get('/api/resources', { params: { type: activeType.value } })
+    // 👉 [修改] 把搜索关键词 keyword 也一起发给后端
+    const res = await request.get('/api/resources', { 
+      params: { 
+        type: activeType.value,
+        keyword: searchQuery.value 
+      } 
+    })
+    
     if (!isPageActive.value) return
     if (res.data.code === 200) {
-      // 👉 注入收藏状态
       resourceList.value = res.data.data.map(item => ({
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
@@ -159,14 +179,7 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 10%;
 }
-/* 👉 全站统一的控制区样式 */
-.filter-container {
-  margin-bottom: 25px;
-}
 
-.category-tabs {
-  flex: 1; /* 让标签页自动占满左侧空间 */
-}
 .resource-col {
   margin-bottom: 20px;
 }

@@ -678,20 +678,35 @@ app.get('/api/admin/posts', isAdmin, async (req, res) => {
     }
 });
 
-// 👉 [新增] 6. 获取当前用户自己发布的帖子 (需要保安验证)
+// 👉 [终极升级版] 6. 获取当前用户所有的发布 (帖子、面经、招募 三合一！)
 app.get('/api/user/posts', authenticateToken, async (req, res) => {
     try {
-        const query = `
-            SELECT p.id, p.title, p.content, p.tags, p.created_at, c.name AS category_name
-            FROM posts p
-            LEFT JOIN categories c ON p.category_id = c.id
-            WHERE p.user_id = ?
-            ORDER BY p.created_at DESC
-        `;
-        const [rows] = await db.query(query, [req.user.id]);
-        res.send({ code: 200, message: '获取成功', data: rows });
+        const userId = req.user.id;
+
+        // 1. 查论坛帖子 (标记 item_type 为 'post')
+        const [posts] = await db.query(`
+            SELECT p.id, p.title, p.content, p.created_at, c.name AS category_name, 'post' AS item_type
+            FROM posts p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?
+        `, [userId]);
+
+        // 2. 查面经分享 (标记 item_type 为 'career')
+        const [careers] = await db.query(`
+            SELECT id, title, content, created_at, type AS category_name, 'career' AS item_type
+            FROM careers WHERE user_id = ?
+        `, [userId]);
+
+        // 3. 查竞赛招募 (标记 item_type 为 'competition')
+        const [comps] = await db.query(`
+            SELECT id, title, description AS content, created_at, comp_name AS category_name, 'competition' AS item_type
+            FROM competitions WHERE user_id = ?
+        `, [userId]);
+
+        // 4. 将三个数组合并，并按照时间从新到旧重新排序！
+        const allData = [...posts, ...careers, ...comps].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+        res.send({ code: 200, message: '获取成功', data: allData });
     } catch (error) {
-        console.error('获取我的帖子失败:', error);
+        console.error('获取我的发布失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
@@ -752,55 +767,52 @@ app.get('/api/comments/:postId', async (req, res) => {
 // 👉 [新增] 9. 获取个人提升资源列表 (公开接口)
 app.get('/api/resources', async (req, res) => {
     try {
-        // 允许前端传一个 type 过来进行分类筛选（比如只看“编程开发”）
-        const { type } = req.query;
+        const { type, keyword } = req.query; // 接收 keyword
 
-        let query = 'SELECT * FROM resources';
+        let query = 'SELECT * FROM resources WHERE 1=1';
         const queryParams = [];
 
-        // 如果前端传了分类，就加上 WHERE 条件
         if (type) {
-            query += ' WHERE type = ?';
+            query += ' AND type = ?';
             queryParams.push(type);
         }
 
-        // 按照添加时间倒序排列
+        // 模糊搜索：匹配资源标题或描述
+        if (keyword) {
+            query += ' AND (title LIKE ? OR description LIKE ?)';
+            const searchStr = `%${keyword}%`;
+            queryParams.push(searchStr, searchStr);
+        }
+
         query += ' ORDER BY created_at DESC';
-
         const [rows] = await db.query(query, queryParams);
-
-        res.send({
-            code: 200,
-            message: '获取资源成功',
-            data: rows
-        });
-    } catch (error) {
-        console.error('获取资源失败:', error);
-        res.status(500).send({ code: 500, message: '服务器内部错误' });
-    }
+        res.send({ code: 200, message: '获取资源成功', data: rows });
+    } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
 });
 // 👉 [新增] 10. 获取升学考公资料列表 (公开接口)
 app.get('/api/study', async (req, res) => {
     try {
-        const { category } = req.query; // 允许按分类筛选
+        const { category, keyword } = req.query; // 接收 keyword
 
-        let query = 'SELECT * FROM study_materials';
+        let query = 'SELECT * FROM study_materials WHERE 1=1';
         const queryParams = [];
 
         if (category) {
-            query += ' WHERE category = ?';
+            query += ' AND category = ?';
             queryParams.push(category);
         }
 
+        // 模糊搜索：匹配标题或资料描述
+        if (keyword) {
+            query += ' AND (title LIKE ? OR description LIKE ?)';
+            const searchStr = `%${keyword}%`;
+            queryParams.push(searchStr, searchStr);
+        }
+
         query += ' ORDER BY created_at DESC';
-
         const [rows] = await db.query(query, queryParams);
-
         res.send({ code: 200, message: '获取资料成功', data: rows });
-    } catch (error) {
-        console.error('获取升学资料失败:', error);
-        res.status(500).send({ code: 500, message: '服务器内部错误' });
-    }
+    } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
 });
 // 👉 [新增] 11. 获取竞赛组队列表 (公开接口)
 app.get('/api/competitions', async (req, res) => {
@@ -895,15 +907,10 @@ app.post('/api/competitions', authenticateToken, async (req, res) => {
         competitionPublishLimiter.set(userId, validRecords);
 
         const [result] = await db.query(
-            `INSERT INTO competitions (comp_name, title, description, required_skills, status, contact_info)
-             VALUES (?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO competitions (comp_name, title, description, required_skills, status, contact_info, user_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
             [
-                trimmedCompName,
-                trimmedTitle,
-                trimmedDescription,
-                trimmedSkills,
-                finalStatus,
-                trimmedContact
+                trimmedCompName, trimmedTitle, trimmedDescription, trimmedSkills, finalStatus, trimmedContact, userId
             ]
         );
 
@@ -922,17 +929,51 @@ app.post('/api/competitions', authenticateToken, async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
+// 👉 [新增] 11-3. 删除自己的竞赛招募
+app.delete('/api/competitions/:id', authenticateToken, async (req, res) => {
+    try {
+        const compId = req.params.id;
+        const userId = req.user.id;
+        const adminDeleting = Number(req.user.role) === 1;
+
+        const [comps] = await db.query('SELECT user_id FROM competitions WHERE id = ?', [compId]);
+        if (comps.length === 0) return res.send({ code: 404, message: '记录不存在' });
+
+        if (!adminDeleting && comps[0].user_id !== userId) {
+            return res.send({ code: 403, message: '无权删除别人的招募' });
+        }
+
+        // 清理收藏并删除
+        await db.query(`DELETE FROM favorites WHERE target_type = 'competition' AND target_id = ?`, [compId]);
+        await db.query(`DELETE FROM competitions WHERE id = ?`, [compId]);
+
+        res.send({ code: 200, message: '删除成功' });
+    } catch (error) {
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
 // 👉 [新增] 12. 获取实习与就业列表 (公开接口)
+// 👉 [升级版] 获取实习与就业列表 (支持分类 + 关键字模糊搜索)
 app.get('/api/careers', async (req, res) => {
     try {
-        const { type } = req.query; // 允许按分类筛选
+        const { type, keyword } = req.query; // 接收前端传来的 type 和 keyword
 
-        let query = 'SELECT * FROM careers';
+        // 技巧：加一个 WHERE 1=1，方便后面随时拼接 AND 条件
+        let query = 'SELECT * FROM careers WHERE 1=1';
         const queryParams = [];
 
+        // 1. 如果前端传了分类，加上分类条件
         if (type) {
-            query += ' WHERE type = ?';
+            query += ' AND type = ?';
             queryParams.push(type);
+        }
+
+        // 2. 如果前端传了搜索关键词，加上模糊查询条件 (LIKE)
+        if (keyword) {
+            // 我们去匹配：公司名、标题、或者内容里包含这个关键词的记录
+            query += ' AND (company LIKE ? OR title LIKE ? OR content LIKE ?)';
+            const searchStr = `%${keyword}%`; // 在两边加上 % 代表模糊匹配
+            queryParams.push(searchStr, searchStr, searchStr);
         }
 
         query += ' ORDER BY created_at DESC';
@@ -985,8 +1026,8 @@ app.post('/api/careers', authenticateToken, async (req, res) => {
         const finalContact = finalType === '面试经验' ? '无需投递' : normalizedContact;
 
         const [result] = await db.query(
-            'INSERT INTO careers (company, title, type, content, tags, contact) VALUES (?, ?, ?, ?, ?, ?)',
-            [normalizedCompany, normalizedTitle, finalType, normalizedContent, normalizedTags, finalContact]
+            'INSERT INTO careers (company, title, type, content, tags, contact, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [normalizedCompany, normalizedTitle, finalType, normalizedContent, normalizedTags, finalContact, req.user.id]
         );
 
         res.send({
@@ -996,6 +1037,34 @@ app.post('/api/careers', authenticateToken, async (req, res) => {
         });
     } catch (error) {
         console.error('发布就业信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+// 👉 [新增] 12.2 删除实习与就业信息
+app.delete('/api/careers/:id', authenticateToken, async (req, res) => {
+    try {
+        const careerId = req.params.id;
+        const userId = req.user.id;
+        const adminDeleting = Number(req.user.role) === 1;
+
+        // 1. 查一下这条信息是不是当前登录用户发的
+        const [careers] = await db.query('SELECT user_id FROM careers WHERE id = ?', [careerId]);
+        if (careers.length === 0) {
+            return res.send({ code: 404, message: '该记录不存在' });
+        }
+
+        // 如果既不是管理员，也不是发帖人本人，就拒绝删除
+        if (!adminDeleting && careers[0].user_id !== userId) {
+            return res.send({ code: 403, message: '你没有权限删除别人的发布！' });
+        }
+
+        // 2. 清理相关收藏，再删掉本体
+        await db.query(`DELETE FROM favorites WHERE target_type = 'career' AND target_id = ?`, [careerId]);
+        await db.query(`DELETE FROM careers WHERE id = ?`, [careerId]);
+
+        res.send({ code: 200, message: '删除成功' });
+    } catch (error) {
+        console.error('删除实习信息失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
