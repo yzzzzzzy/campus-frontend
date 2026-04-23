@@ -945,6 +945,61 @@ app.get('/api/careers', async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
+
+// 👉 [新增] 12.1 分享面试经验 / 管理员后续可扩展发布职业信息
+app.post('/api/careers', authenticateToken, async (req, res) => {
+    try {
+        const { company, title, content, tags, type, contact } = req.body;
+        const normalizedCompany = normalizeString(company);
+        const normalizedTitle = normalizeString(title);
+        const normalizedContent = normalizeString(content);
+        const normalizedTags = normalizeOptionalString(tags);
+        const requestedType = normalizeString(type) || '面试经验';
+        const normalizedContact = normalizeOptionalString(contact) || '无需投递';
+
+        if (!normalizedCompany || !normalizedTitle || !normalizedContent) {
+            return res.send({ code: 400, message: '公司、标题和内容不能为空' });
+        }
+        if (normalizedCompany.length > 100) {
+            return res.send({ code: 400, message: '公司名称不能超过100个字符' });
+        }
+        if (normalizedTitle.length > 100) {
+            return res.send({ code: 400, message: '标题不能超过100个字符' });
+        }
+        if (normalizedContent.length > 5000) {
+            return res.send({ code: 400, message: '内容不能超过5000个字符' });
+        }
+        if (normalizedTags && normalizedTags.length > 255) {
+            return res.send({ code: 400, message: '标签长度不能超过255个字符' });
+        }
+        if (normalizedContact && normalizedContact.length > 100) {
+            return res.send({ code: 400, message: '联系方式不能超过100个字符' });
+        }
+
+        // 普通用户只能分享面试经验；管理员后续可扩展发布其他就业信息
+        if (Number(req.user.role) !== 1 && requestedType !== '面试经验') {
+            return res.status(403).send({ code: 403, message: '普通用户只能分享面试经验' });
+        }
+
+        const finalType = Number(req.user.role) === 1 ? requestedType : '面试经验';
+        const finalContact = finalType === '面试经验' ? '无需投递' : normalizedContact;
+
+        const [result] = await db.query(
+            'INSERT INTO careers (company, title, type, content, tags, contact) VALUES (?, ?, ?, ?, ?, ?)',
+            [normalizedCompany, normalizedTitle, finalType, normalizedContent, normalizedTags, finalContact]
+        );
+
+        res.send({
+            code: 200,
+            message: finalType === '面试经验' ? '面经发布成功，感谢分享！' : '信息发布成功',
+            data: { postId: result.insertId }
+        });
+    } catch (error) {
+        console.error('发布就业信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
 // 👉 [新增] 14. 修改个人资料 (昵称、头像)
 app.put('/api/user/info', authenticateToken, async (req, res) => {
     try {
