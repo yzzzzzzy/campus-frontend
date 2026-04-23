@@ -5,13 +5,52 @@
         <el-button @click="router.push('/home')" icon="Back">返回主页</el-button>
       </NavBar>
 
+      <el-dialog v-model="publishDialogVisible" title="分享面试经验" width="520px" destroy-on-close>
+        <el-alert
+          title="普通用户只能发布面试经验。其他就业信息后续由管理员后台统一上传。"
+          type="info"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 16px;"
+        />
+        <el-form :model="publishForm" label-position="top">
+          <el-form-item label="公司 / 企业名称">
+            <el-input v-model="publishForm.company" placeholder="例如：腾讯 / 字节跳动 / 美团" maxlength="100" show-word-limit />
+          </el-form-item>
+          <el-form-item label="面经标题">
+            <el-input v-model="publishForm.title" placeholder="例如：腾讯前端二面面经" maxlength="100" show-word-limit />
+          </el-form-item>
+          <el-form-item label="面试经验内容">
+            <el-input
+              v-model="publishForm.content"
+              type="textarea"
+              :rows="7"
+              placeholder="描述面试流程、八股、算法题、感受等"
+              maxlength="5000"
+              show-word-limit
+            />
+          </el-form-item>
+          <el-form-item label="标签（逗号分隔，可选）">
+            <el-input v-model="publishForm.tags" placeholder="例如：Java, 前端, 已拿Offer" maxlength="255" show-word-limit />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="publishDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="publishing" @click="handlePublishExperience">发布面经</el-button>
+        </template>
+      </el-dialog>
+
       <el-main class="main-content">
-        <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchCareers">
-          <el-tab-pane label="全部信息" name=""></el-tab-pane>
-          <el-tab-pane label="🚀 校招内推" name="校招内推"></el-tab-pane>
-          <el-tab-pane label="💻 实习机会" name="实习机会"></el-tab-pane>
-          <el-tab-pane label="📝 面试经验" name="面试经验"></el-tab-pane>
-        </el-tabs>
+        <div class="filter-container">
+          <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchCareers">
+            <el-tab-pane label="全部信息" name=""></el-tab-pane>
+            <el-tab-pane label="🚀 校招内推" name="校招内推"></el-tab-pane>
+            <el-tab-pane label="💻 实习机会" name="实习机会"></el-tab-pane>
+            <el-tab-pane label="📝 面试经验" name="面试经验"></el-tab-pane>
+          </el-tabs>
+          
+          <el-button type="warning" @click="publishDialogVisible = true" icon="EditPen">分享面经</el-button>
+        </div>
 
         <el-row :gutter="20">
           <el-col :span="24" v-for="item in careerList" :key="item.id" class="career-col">
@@ -78,6 +117,14 @@ const activeType = ref('')
 const careerList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
+const publishDialogVisible = ref(false)
+const publishing = ref(false)
+const publishForm = ref({
+  company: '',
+  title: '',
+  content: '',
+  tags: ''
+})
 
 const syncFavoriteIds = (targetId, shouldInclude) => {
   const ids = new Set(myFavoriteIds.value)
@@ -144,6 +191,40 @@ const handleFavorite = async (item) => {
   } catch (error) { ElMessage.error('操作失败') }
 }
 
+const handlePublishExperience = async () => {
+  if (!publishForm.value.company || !publishForm.value.title || !publishForm.value.content) {
+    ElMessage.warning('公司、标题和内容不能为空')
+    return
+  }
+
+  publishing.value = true
+  try {
+    const res = await request.post('/api/careers', {
+      company: publishForm.value.company,
+      title: publishForm.value.title,
+      type: '面试经验',
+      content: publishForm.value.content,
+      tags: publishForm.value.tags,
+      contact: '无需投递'
+    })
+
+    if (!isPageActive.value) return
+
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message || '面经发布成功，感谢分享！')
+      publishDialogVisible.value = false
+      publishForm.value = { company: '', title: '', content: '', tags: '' }
+      await fetchCareers()
+    } else {
+      ElMessage.error(res.data.message)
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '发布失败，请检查登录状态')
+  } finally {
+    publishing.value = false
+  }
+}
+
 onMounted(async () => {
   await fetchMyFavorites()
   await fetchCareers()
@@ -169,11 +250,26 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 15%; /* 列表布局，两边留白多一点 */
 }
-.category-tabs {
-  margin-bottom: 20px;
+/* 整合后的控制区样式 */
+.filter-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   background: white;
+  margin-bottom: 20px;
   padding: 0 20px;
   border-radius: 8px;
+}
+
+.category-tabs {
+  flex: 1; /* 让标签页占满左边 */
+  margin-bottom: 0; 
+  padding: 0;
+  background: transparent;
+}
+
+:deep(.el-tabs__header) {
+  margin: 0;
 }
 .career-col {
   margin-bottom: 15px;
