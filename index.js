@@ -15,6 +15,11 @@ const app = express();
 const competitionPublishLimiter = new Map();
 const COMPETITION_PUBLISH_WINDOW_MS = 60 * 1000;
 const COMPETITION_PUBLISH_MAX = 3;
+const passwordResetRequestAccountLimiter = new Map();
+const passwordResetRequestIpLimiter = new Map();
+const PASSWORD_RESET_REQUEST_WINDOW_MS = 60 * 1000;
+const PASSWORD_RESET_REQUEST_ACCOUNT_MAX = 1;
+const PASSWORD_RESET_REQUEST_IP_MAX = 3;
 const SERVER_PUBLIC_BASE_URL = (process.env.SERVER_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
 
 const API_ERROR_MESSAGES = {
@@ -23,6 +28,10 @@ const API_ERROR_MESSAGES = {
     500: '服务器开小差了，请稍后重试'
 };
 const ALLOWED_FAVORITE_TYPES = ['post', 'study', 'career', 'resource', 'competition'];
+const PASSWORD_RESET_REQUEST_STATUS = {
+    PENDING: 'pending',
+    PROCESSED: 'processed'
+};
 
 const sendApiError = (res, status = 500, message, extra = {}) => {
     return res.status(status).send({
@@ -38,6 +47,7 @@ const getServerBaseUrl = (req) => {
 };
 
 const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
+const ADMIN_DEFAULT_RESET_PASSWORD = normalizeString(process.env.ADMIN_DEFAULT_RESET_PASSWORD || '123456');
 const normalizeOptionalString = (value) => {
     const normalized = normalizeString(value);
     return normalized || null;
@@ -197,6 +207,91 @@ app.post('/api/login', async (req, res) => {
         });
     } catch (error) {
         console.error('登录错误:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 忘记密码：联系管理员留言
+app.post('/api/password-reset-requests', async (req, res) => {
+    try {
+        const { username, message } = req.body;
+        const normalizedUsername = normalizeString(username);
+        const normalizedMessage = normalizeString(message);
+        const clientIp = normalizeString(req.ip || req.headers['x-forwarded-for'] || 'unknown');
+
+        if (!normalizedUsername || !normalizedMessage) {
+            return res.send({ code: 400, message: '账号和留言内容不能为空' });
+        }
+        if (normalizedUsername.length > 50) {
+            return res.send({ code: 400, message: '账号长度不能超过50个字符' });
+        }
+        if (normalizedMessage.length < 6 || normalizedMessage.length > 500) {
+            return res.send({ code: 400, message: '留言内容长度需在6到500个字符之间' });
+        }
+
+        // 双限流：同账号 60 秒内最多 1 次，同 IP 60 秒内最多 3 次
+        const now = Date.now();
+        const accountHistory = passwordResetRequestAccountLimiter.get(normalizedUsername) || [];
+        const validAccountHistory = accountHistory.filter(timestamp => now - timestamp <= PASSWORD_RESET_REQUEST_WINDOW_MS);
+        if (validAccountHistory.length >= PASSWORD_RESET_REQUEST_ACCOUNT_MAX) {
+            return res.status(429).send({ code: 429, message: '提交过于频繁，请1分钟后再试' });
+        }
+
+        const ipHistory = passwordResetRequestIpLimiter.get(clientIp) || [];
+        const validIpHistory = ipHistory.filter(timestamp => now - timestamp <= PASSWORD_RESET_REQUEST_WINDOW_MS);
+        if (validIpHistory.length >= PASSWORD_RESET_REQUEST_IP_MAX) {
+            return res.status(429).send({ code: 429, message: '当前网络提交过于频繁，请1分钟后再试' });
+        }
+
+        const [users] = await db.query('SELECT id FROM users WHERE username = ? LIMIT 1', [normalizedUsername]);
+        if (users.length === 0) {
+            return res.send({ code: 400, message: '该账号不存在，请检查后重试' });
+        }
+
+        await db.query(
+            `INSERT INTO password_reset_requests (username, message, status)
+             VALUES (?, ?, ?)`,
+            [normalizedUsername, normalizedMessage, PASSWORD_RESET_REQUEST_STATUS.PENDING]
+        );
+
+        passwordResetRequestAccountLimiter.set(normalizedUsername, [...validAccountHistory, now]);
+        passwordResetRequestIpLimiter.set(clientIp, [...validIpHistory, now]);
+
+        res.send({ code: 200, message: '留言提交成功，管理员会尽快处理' });
+    } catch (error) {
+        console.error('提交找回密码留言失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 忘记密码：提交前校验账号是否存在
+app.post('/api/password-reset-requests/verify-user', async (req, res) => {
+    try {
+        const { username } = req.body;
+        const normalizedUsername = normalizeString(username);
+
+        if (!normalizedUsername) {
+            return res.send({ code: 400, message: '账号不能为空' });
+        }
+        if (normalizedUsername.length > 50) {
+            return res.send({ code: 400, message: '账号长度不能超过50个字符' });
+        }
+
+        const [users] = await db.query('SELECT id, username, nickname FROM users WHERE username = ? LIMIT 1', [normalizedUsername]);
+        if (users.length === 0) {
+            return res.send({ code: 400, message: '账号不存在，请检查后重试' });
+        }
+
+        res.send({
+            code: 200,
+            message: '账号校验通过',
+            data: {
+                username: users[0].username,
+                nickname: users[0].nickname
+            }
+        });
+    } catch (error) {
+        console.error('校验账号失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
@@ -420,6 +515,120 @@ app.patch('/api/admin/users/:id/status', isAdmin, async (req, res) => {
         });
     } catch (error) {
         console.error('更新用户状态失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员重置用户密码
+app.post('/api/admin/users/:id/reset-password', isAdmin, async (req, res) => {
+    try {
+        const targetUserId = toPositiveInt(req.params.id);
+
+        if (!targetUserId) {
+            return res.send({ code: 400, message: '用户ID格式不正确' });
+        }
+        if (targetUserId === req.user.id) {
+            return res.send({ code: 400, message: '请在个人中心自行修改密码' });
+        }
+
+        const [targetUsers] = await db.query('SELECT id, role FROM users WHERE id = ? LIMIT 1', [targetUserId]);
+        if (targetUsers.length === 0) {
+            return res.send({ code: 404, message: '目标用户不存在' });
+        }
+        if (Number(targetUsers[0].role) === 1) {
+            return res.send({ code: 400, message: '管理员账号不支持在此页面重置密码' });
+        }
+
+        const salt = bcrypt.genSaltSync(10);
+        const hashedPassword = bcrypt.hashSync(ADMIN_DEFAULT_RESET_PASSWORD, salt);
+
+        await db.query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, targetUserId]);
+
+        res.send({ code: 200, message: `密码已重置为默认值：${ADMIN_DEFAULT_RESET_PASSWORD}` });
+    } catch (error) {
+        console.error('管理员重置密码失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员查看找回密码留言
+app.get('/api/admin/password-reset-requests', isAdmin, async (req, res) => {
+    try {
+        const keyword = normalizeString(req.query.keyword);
+        const status = normalizeString(req.query.status);
+
+        let whereClause = 'WHERE 1=1';
+        const queryParams = [];
+
+        if (keyword) {
+            whereClause += ' AND (username LIKE ? OR message LIKE ? OR admin_note LIKE ?)';
+            queryParams.push(`%${keyword}%`, `%${keyword}%`, `%${keyword}%`);
+        }
+
+        if (status) {
+            if (![PASSWORD_RESET_REQUEST_STATUS.PENDING, PASSWORD_RESET_REQUEST_STATUS.PROCESSED].includes(status)) {
+                return res.send({ code: 400, message: '状态参数不合法' });
+            }
+            whereClause += ' AND status = ?';
+            queryParams.push(status);
+        }
+
+        const [rows] = await db.query(
+            `SELECT id, username, message, status, created_at, processed_at, processed_by, admin_note
+             FROM password_reset_requests
+             ${whereClause}
+             ORDER BY created_at DESC`,
+            queryParams
+        );
+
+        res.send({ code: 200, message: '获取成功', data: rows });
+    } catch (error) {
+        console.error('获取找回密码留言失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员处理找回密码留言
+app.patch('/api/admin/password-reset-requests/:id', isAdmin, async (req, res) => {
+    try {
+        const requestId = toPositiveInt(req.params.id);
+        const status = normalizeString(req.body.status);
+        const adminNote = normalizeOptionalString(req.body.adminNote);
+
+        if (!requestId) {
+            return res.send({ code: 400, message: '留言ID格式不正确' });
+        }
+        if (![PASSWORD_RESET_REQUEST_STATUS.PROCESSED, PASSWORD_RESET_REQUEST_STATUS.PENDING].includes(status)) {
+            return res.send({ code: 400, message: '状态参数不合法' });
+        }
+        if (adminNote && adminNote.length > 255) {
+            return res.send({ code: 400, message: '管理员备注不能超过255个字符' });
+        }
+
+        const [targetRows] = await db.query('SELECT id FROM password_reset_requests WHERE id = ? LIMIT 1', [requestId]);
+        if (targetRows.length === 0) {
+            return res.send({ code: 404, message: '留言不存在' });
+        }
+
+        if (status === PASSWORD_RESET_REQUEST_STATUS.PROCESSED) {
+            await db.query(
+                `UPDATE password_reset_requests
+                 SET status = ?, processed_at = NOW(), processed_by = ?, admin_note = ?
+                 WHERE id = ?`,
+                [status, req.user.id, adminNote, requestId]
+            );
+        } else {
+            await db.query(
+                `UPDATE password_reset_requests
+                 SET status = ?, processed_at = NULL, processed_by = NULL, admin_note = ?
+                 WHERE id = ?`,
+                [status, adminNote, requestId]
+            );
+        }
+
+        res.send({ code: 200, message: status === PASSWORD_RESET_REQUEST_STATUS.PROCESSED ? '已标记为已处理' : '已改回待处理' });
+    } catch (error) {
+        console.error('处理找回密码留言失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
