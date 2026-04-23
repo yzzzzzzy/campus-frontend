@@ -41,8 +41,8 @@
       </el-dialog>
 
       <el-main class="main-content">
-        <div class="filter-container">
-          <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchCareers">
+        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #E6A23C;">
+          <el-tabs v-model="activeType" class="category-tabs unified-tabs" @tab-change="fetchCareers">
             <el-tab-pane label="全部信息" name=""></el-tab-pane>
             <el-tab-pane label="🚀 校招内推" name="校招内推"></el-tab-pane>
             <el-tab-pane label="💻 实习机会" name="实习机会"></el-tab-pane>
@@ -250,27 +250,20 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 15%; /* 列表布局，两边留白多一点 */
 }
-/* 整合后的控制区样式 */
+/* 👉 全站统一的控制区样式 */
 .filter-container {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-  margin-bottom: 20px;
-  padding: 0 20px;
-  border-radius: 8px;
+  margin-bottom: 25px;
 }
 
 .category-tabs {
-  flex: 1; /* 让标签页占满左边 */
-  margin-bottom: 0; 
-  padding: 0;
-  background: transparent;
+  flex: 1; /* 让标签页自动占满左侧空间 */
 }
 
-:deep(.el-tabs__header) {
-  margin: 0;
+.action-btn-group {
+  margin-left: 20px;
 }
+
+
 .career-col {
   margin-bottom: 15px;
 }

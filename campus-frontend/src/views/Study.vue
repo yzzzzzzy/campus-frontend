@@ -7,12 +7,14 @@
       
 
       <el-main class="main-content">
-        <el-tabs v-model="activeCategory" class="category-tabs" @tab-change="handleCategoryChange">
-          <el-tab-pane label="全部资料" name=""></el-tab-pane>
-          <el-tab-pane label="📖 考研资料" name="考研资料"></el-tab-pane>
-          <el-tab-pane label="🏛️ 考公资料" name="考公资料"></el-tab-pane>
-          <el-tab-pane label="🔤 四六级" name="四六级"></el-tab-pane>
-        </el-tabs>
+        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #409EFF;">
+          <el-tabs v-model="activeCategory" class="category-tabs unified-tabs" @tab-change="fetchStudyMaterials">
+            <el-tab-pane label="全部资料" name=""></el-tab-pane>
+            <el-tab-pane label="考研资料" name="考研资料"></el-tab-pane>
+            <el-tab-pane label="考公资料" name="考公资料"></el-tab-pane>
+            <el-tab-pane label="四六级" name="四六级"></el-tab-pane>
+          </el-tabs>
+        </div>
 
         <el-card shadow="hover" class="list-card">
           <el-empty v-if="studyList.length === 0" description="暂无该分类资料" />
@@ -88,9 +90,9 @@ const fetchMyFavorites = async () => {
     }
   } catch (error) { }
 }
-const fetchStudyMaterials = async (category = '') => {
+const fetchStudyMaterials = async () => {
   try {
-    const res = await request.get('/api/study', { params: { category: category } })
+    const res = await request.get('/api/study', { params: { category: activeCategory.value } })
     if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 遍历资料，比对收藏 ID
@@ -100,10 +102,6 @@ const fetchStudyMaterials = async (category = '') => {
       }))
     }
   } catch (error) { ElMessage.error('获取资料列表失败') }
-}
-
-const handleCategoryChange = (tabName) => {
-  fetchStudyMaterials(tabName)
 }
 
 const handleDownload = (url) => {
@@ -152,11 +150,13 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 15%; /* 列表模式两边留白多一点更好看 */
 }
+/* 👉 全站统一的控制区样式 */
+.filter-container {
+  margin-bottom: 25px;
+}
+
 .category-tabs {
-  margin-bottom: 20px;
-  background: white;
-  padding: 0 20px;
-  border-radius: 8px;
+  flex: 1; /* 让标签页自动占满左侧空间 */
 }
 .list-card {
   border-radius: 8px;

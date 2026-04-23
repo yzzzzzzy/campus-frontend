@@ -7,12 +7,14 @@
       
 
       <el-main class="main-content">
-        <el-tabs v-model="activeCategory" class="category-tabs" @tab-change="handleCategoryChange">
-          <el-tab-pane label="全部资源" name=""></el-tab-pane>
-          <el-tab-pane label="💻 编程开发" name="编程开发"></el-tab-pane>
-          <el-tab-pane label="🎨 创意设计" name="创意设计"></el-tab-pane>
-          <el-tab-pane label="📈 办公效率" name="办公效率"></el-tab-pane>
-        </el-tabs>
+        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #9C27B0;">
+          <el-tabs v-model="activeType" class="category-tabs unified-tabs" @tab-change="fetchResources">
+            <el-tab-pane label="全部资源" name=""></el-tab-pane>
+            <el-tab-pane label="💻 编程开发" name="编程开发"></el-tab-pane>
+            <el-tab-pane label="🎨 创意设计" name="创意设计"></el-tab-pane>
+            <el-tab-pane label="📊 办公效率" name="办公效率"></el-tab-pane>
+          </el-tabs>
+        </div>
 
         <el-row :gutter="20">
           <el-col :span="8" v-for="item in resourceList" :key="item.id" class="resource-col">
@@ -63,7 +65,7 @@ import { ElMessage } from 'element-plus'
 import NavBar from '../components/NavBar.vue'
 
 const router = useRouter()
-const activeCategory = ref('') // 当前选中的分类，空字符串代表全部
+const activeType = ref('') // 当前选中的分类，空字符串代表全部
 const resourceList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
@@ -88,9 +90,9 @@ const fetchMyFavorites = async () => {
 }
 
 // 获取资源列表的方法，支持传入分类参数
-const fetchResources = async (type = '') => {
+const fetchResources = async () => {
   try {
-    const res = await request.get('/api/resources', { params: { type: type } })
+    const res = await request.get('/api/resources', { params: { type: activeType.value } })
     if (!isPageActive.value) return
     if (res.data.code === 200) {
       // 👉 注入收藏状态
@@ -100,11 +102,6 @@ const fetchResources = async (type = '') => {
       }))
     }
   } catch (error) { ElMessage.error('获取资源列表失败') }
-}
-
-// 切换分类标签时触发
-const handleCategoryChange = (tabName) => {
-  fetchResources(tabName)
 }
 
 // 点击前往学习，在新窗口打开链接
@@ -162,12 +159,13 @@ onUnmounted(() => {
   min-height: calc(100vh - 60px);
   padding: 20px 10%;
 }
+/* 👉 全站统一的控制区样式 */
+.filter-container {
+  margin-bottom: 25px;
+}
+
 .category-tabs {
-  margin-bottom: 20px;
-  background: white;
-  padding: 0 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  flex: 1; /* 让标签页自动占满左侧空间 */
 }
 .resource-col {
   margin-bottom: 20px;
