@@ -12,3 +12,51 @@ body,
 .common-layout>.el-container {
   flex-direction: column !important;
 }
+
+/* 全站统一顶部筛选 Tab 设计语言 */
+.unified-tabs-shell {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: #ffffff;
+  margin-bottom: 25px;
+  padding: 0 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.unified-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.unified-tabs .el-tabs__header {
+  margin: 0;
+}
+
+.unified-tabs .el-tabs__nav-wrap::after {
+  display: none;
+}
+
+.unified-tabs .el-tabs__item {
+  height: 48px;
+  font-size: 14px;
+  color: #6b7280;
+  transition: color 0.25s ease;
+}
+
+.unified-tabs .el-tabs__item:hover {
+  color: var(--tabs-accent, #409eff);
+}
+
+.unified-tabs .el-tabs__item.is-active {
+  color: var(--tabs-accent, #409eff);
+  font-weight: 600;
+}
+
+.unified-tabs .el-tabs__active-bar {
+  background-color: var(--tabs-accent, #409eff);
+  height: 3px;
+  border-radius: 3px;
+}
