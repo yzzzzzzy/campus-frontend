@@ -4,7 +4,10 @@
   "description": "本项目旨在打造一个高价值的校园综合信息交互平台。区别于传统的泛娱乐校园墙，本平台**立足于消除大学生之间的“信息差”**，专注于学生的学业提升、职业发展以及高质量的校园生活互助，为在校大学生提供一站式的信息检索与资源共享服务。",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "frontend": "cd campus-frontend && npm run dev",
+    "start:all": "concurrently \"npm run start\" \"npm run frontend\""
   },
   "keywords": [],
   "author": "",
@@ -18,5 +21,8 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "mysql2": "^3.22.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
