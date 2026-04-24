@@ -199,6 +199,7 @@
                       <el-option label="正常" :value="'1'" />
                       <el-option label="封禁" :value="'0'" />
                     </el-select>
+                    <el-button type="warning" plain @click="openCreateAdminDialog">创建管理员</el-button>
                     <el-button type="primary" @click="loadUsers" :loading="usersLoading">搜索</el-button>
                   </div>
                 </div>
@@ -457,6 +458,60 @@
               </el-tabs>
             </el-card>
           </section>
+
+          <el-dialog v-model="createAdminDialogVisible" title="创建管理员账号" width="560px" destroy-on-close>
+            <el-alert
+              type="warning"
+              title="该操作会授予后台管理权限，请谨慎执行"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 14px;"
+            />
+
+            <el-form :model="createAdminForm" label-position="top">
+              <el-form-item label="新管理员账号（学号）">
+                <el-input v-model="createAdminForm.username" maxlength="50" placeholder="例如：20260001" />
+              </el-form-item>
+              <el-form-item label="新管理员昵称">
+                <el-input v-model="createAdminForm.nickname" maxlength="50" placeholder="例如：系统管理员-张三" />
+              </el-form-item>
+              <el-form-item label="新管理员密码">
+                <el-input
+                  v-model="createAdminForm.password"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  placeholder="8-50位，含大小写字母、数字和特殊字符"
+                />
+              </el-form-item>
+              <el-form-item label="确认新管理员密码">
+                <el-input
+                  v-model="createAdminForm.confirmPassword"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  placeholder="再次输入新管理员密码"
+                />
+              </el-form-item>
+              <el-form-item label="当前管理员密码（用于授权验证）">
+                <el-input
+                  v-model="createAdminForm.currentAdminPassword"
+                  type="password"
+                  show-password
+                  autocomplete="current-password"
+                  placeholder="请输入你当前账号密码"
+                />
+              </el-form-item>
+              <el-form-item label="确认口令（必须输入 CREATE_ADMIN）">
+                <el-input v-model="createAdminForm.confirmText" placeholder="CREATE_ADMIN" maxlength="32" />
+              </el-form-item>
+            </el-form>
+
+            <template #footer>
+              <el-button @click="createAdminDialogVisible = false">取消</el-button>
+              <el-button type="danger" :loading="createAdminLoading" @click="handleCreateAdmin">确认创建</el-button>
+            </template>
+          </el-dialog>
         </el-main>
       </el-container>
     </el-container>
@@ -476,6 +531,8 @@ const usersLoading = ref(false)
 const postsLoading = ref(false)
 const resetRequestsLoading = ref(false)
 const publishLoading = ref(false)
+const createAdminDialogVisible = ref(false)
+const createAdminLoading = ref(false)
 const currentUser = ref(JSON.parse(localStorage.getItem('user') || 'null'))
 const publishTab = ref('resource')
 
@@ -553,6 +610,15 @@ const careerForm = reactive({
   content: '',
   tags: '',
   contact: ''
+})
+
+const createAdminForm = reactive({
+  username: '',
+  nickname: '',
+  password: '',
+  confirmPassword: '',
+  currentAdminPassword: '',
+  confirmText: ''
 })
 
 const sectionTitle = computed(() => {
@@ -802,6 +868,83 @@ const handleAdminApiError = (error) => {
     return
   }
   ElMessage.error('管理员数据加载失败，请稍后重试')
+}
+
+const resetCreateAdminForm = () => {
+  createAdminForm.username = ''
+  createAdminForm.nickname = ''
+  createAdminForm.password = ''
+  createAdminForm.confirmPassword = ''
+  createAdminForm.currentAdminPassword = ''
+  createAdminForm.confirmText = ''
+}
+
+const openCreateAdminDialog = () => {
+  resetCreateAdminForm()
+  createAdminDialogVisible.value = true
+}
+
+const handleCreateAdmin = async () => {
+  if (
+    !createAdminForm.username ||
+    !createAdminForm.nickname ||
+    !createAdminForm.password ||
+    !createAdminForm.confirmPassword ||
+    !createAdminForm.currentAdminPassword ||
+    !createAdminForm.confirmText
+  ) {
+    ElMessage.warning('请完整填写管理员创建信息')
+    return
+  }
+
+  if (createAdminForm.password !== createAdminForm.confirmPassword) {
+    ElMessage.warning('两次输入的新管理员密码不一致')
+    return
+  }
+
+  if (createAdminForm.confirmText !== 'CREATE_ADMIN') {
+    ElMessage.warning('确认口令不正确，请输入 CREATE_ADMIN')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认创建管理员账号 ${createAdminForm.username} 吗？该账号将拥有后台全部管理权限。`,
+      '高危操作确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认创建',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch (error) {
+    return
+  }
+
+  createAdminLoading.value = true
+  try {
+    const res = await request.post('/api/admin/users/create-admin', {
+      username: createAdminForm.username,
+      nickname: createAdminForm.nickname,
+      password: createAdminForm.password,
+      confirmPassword: createAdminForm.confirmPassword,
+      currentAdminPassword: createAdminForm.currentAdminPassword,
+      confirmText: createAdminForm.confirmText
+    })
+
+    if (res.data.code === 200) {
+      ElMessage.success('管理员账号创建成功')
+      createAdminDialogVisible.value = false
+      resetCreateAdminForm()
+      await Promise.all([loadUsers(), loadStats()])
+    } else {
+      ElMessage.error(res.data.message || '管理员账号创建失败')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '管理员账号创建失败')
+  } finally {
+    createAdminLoading.value = false
+  }
 }
 
 const resetResourceForm = () => {
