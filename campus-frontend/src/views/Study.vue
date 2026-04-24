@@ -8,8 +8,7 @@
 
       <el-main class="main-content">
         <div class="filter-container">
-          
-          <el-tabs v-model="activeCategory" class="category-tabs" @tab-change="fetchStudyMaterials">
+          <el-tabs v-model="activeCategory" class="category-tabs" @tab-change="handleFilterChange">
             <el-tab-pane label="全部资料" name=""></el-tab-pane>
             <el-tab-pane label="📚 考研资料" name="考研资料"></el-tab-pane>
             <el-tab-pane label="💼 考公资料" name="考公资料"></el-tab-pane>
@@ -19,12 +18,10 @@
           <div style="display: flex; align-items: center;">
             <el-input 
               v-model="searchQuery" 
-              placeholder="搜索考研/公考/四六级资料..." 
+              placeholder="搜索考研/公考资料..." 
               prefix-icon="Search"
               clearable
-              @clear="fetchStudyMaterials"
-              @keyup.enter="fetchStudyMaterials"
-              style="width: 250px;"
+              @clear="handleFilterChange"      @keyup.enter="handleFilterChange" style="width: 250px;"
             />
           </div>
         </div>
@@ -63,7 +60,20 @@
               </el-button>
             </div>
           </div>
+          
         </el-card>
+        <div class="pagination-container" v-if="totalItems > 0">
+            <el-pagination
+              v-model:current-page="currentPage"
+              v-model:page-size="pageSize"
+              :page-sizes="[5, 10, 20, 50]"
+              background
+              layout="total, sizes, prev, pager, next, jumper"
+              :total="totalItems"
+              @size-change="handleSizeChange"
+              @current-change="handleCurrentChange"
+            />
+          </div>
 
       </el-main>
     </el-container>
@@ -84,6 +94,29 @@ const studyList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
 
+// 👉 [新增] 分页相关变量
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalItems = ref(0)
+
+// 👉 [新增] 统一的过滤/搜索处理器（切换分类或搜索时，强制回到第1页）
+const handleFilterChange = () => {
+  currentPage.value = 1
+  fetchStudyMaterials()
+}
+
+// 👉 [新增] 每页条数改变的回调
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+  fetchStudyMaterials()
+}
+
+// 👉 [新增] 当前页码改变的回调
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  fetchStudyMaterials()
+}
 
 const syncFavoriteIds = (targetId, shouldInclude) => {
   const ids = new Set(myFavoriteIds.value)
@@ -107,14 +140,24 @@ const fetchMyFavorites = async () => {
 }
 const fetchStudyMaterials = async () => {
   try {
-    const res = await request.get('/api/study', { params: { category: activeCategory.value, keyword: searchQuery.value } })
+    // 👉 [修改] 加入 page 和 limit 参数发送给后端
+    const res = await request.get('/api/study', { 
+      params: { 
+        category: activeCategory.value, 
+        keyword: searchQuery.value,
+        page: currentPage.value,
+        limit: pageSize.value
+      } 
+    })
+    
     if (!isPageActive.value) return
     if (res.data.code === 200) {
-      // 遍历资料，比对收藏 ID
       studyList.value = res.data.data.map(item => ({
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
       }))
+      // 👉 [新增] 接收后端返回的总条数
+      totalItems.value = res.data.total || 0
     }
   } catch (error) { ElMessage.error('获取资料列表失败') }
 }

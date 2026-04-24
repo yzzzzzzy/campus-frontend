@@ -7,9 +7,8 @@
       
 
       <el-main class="main-content">
-        <div class="filter-container">
-          
-          <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchResources">
+        <div class="filter-container unified-tabs-shell" style="--tabs-accent: #9C27B0;">
+          <el-tabs v-model="activeType" class="category-tabs unified-tabs" @tab-change="handleFilterChange">
             <el-tab-pane label="全部资源" name=""></el-tab-pane>
             <el-tab-pane label="💻 编程开发" name="编程开发"></el-tab-pane>
             <el-tab-pane label="🎨 创意设计" name="创意设计"></el-tab-pane>
@@ -22,8 +21,8 @@
               placeholder="搜索技能提升资源..." 
               prefix-icon="Search"
               clearable
-              @clear="fetchResources"
-              @keyup.enter="fetchResources"
+              @clear="handleFilterChange"
+              @keyup.enter="handleFilterChange"
               style="width: 250px;"
             />
           </div>
@@ -35,36 +34,50 @@
               <template #header>
                 <div class="card-header">
                   <span class="resource-title">{{ item.title }}</span>
-                  <el-tag :type="getTagType(item.type)" size="small">{{ item.type }}</el-tag>
+                  <el-tag type="info" size="small">{{ item.type }}</el-tag>
                 </div>
               </template>
               <div class="resource-body">
                 <p class="resource-desc">{{ item.description }}</p>
+                <div class="resource-meta">
+                  <span class="meta-item">大小: {{ item.file_size }}</span>
+                  <span class="meta-item">格式: {{ item.file_format }}</span>
+                </div>
               </div>
               <div class="resource-footer">
-                <span class="time-text">收录于: {{ new Date(item.created_at).toLocaleDateString() }}</span>
-                
-                <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="display: flex; align-items: center;">
                   <el-tooltip :content="item.is_favorited ? '取消收藏' : '加入收藏'" placement="top">
                     <el-button 
                       :type="item.is_favorited ? 'warning' : 'info'" 
                       link 
                       :icon="item.is_favorited ? 'StarFilled' : 'Star'" 
                       @click="handleFavorite(item)" 
-                      style="font-size: 20px;" 
+                      style="font-size: 20px; margin-right: 15px;" 
                     />
                   </el-tooltip>
-
-                  <el-button type="primary" plain size="small" @click="goToLearn(item.url)">
-                    前往学习
-                  </el-button>
                 </div>
+                <el-button type="primary" plain size="small" @click="handleDownload(item.download_url)">
+                  获取资源
+                </el-button>
               </div>
             </el-card>
           </el-col>
         </el-row>
 
-        <el-empty v-if="resourceList.length === 0" description="该分类下暂无资源，敬请期待！" />
+        <el-empty v-if="resourceList.length === 0" description="暂无该分类资源" />
+
+        <div class="pagination-container" v-if="totalItems > 0">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[5, 10, 20, 50]"
+            background
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="totalItems"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+          />
+        </div>
       </el-main>
     </el-container>
   </div>
@@ -83,6 +96,27 @@ const searchQuery = ref('') // 👉 [新增] 声明搜索框绑定的变量
 const resourceList = ref([])
 const myFavoriteIds = ref([])
 const isPageActive = ref(true)
+// 👉 [新增] 1. 分页核心变量
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalItems = ref(0)
+
+// 👉 [新增] 2. 统筹控制器（切换分类或搜索时归零）
+const handleFilterChange = () => {
+  currentPage.value = 1
+  fetchResources()
+}
+
+// 👉 [新增] 3. 分页器触发的方法
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+  fetchResources()
+}
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  fetchResources()
+}
 
 const syncFavoriteIds = (targetId, shouldInclude) => {
   const ids = new Set(myFavoriteIds.value)
@@ -106,11 +140,12 @@ const fetchMyFavorites = async () => {
 // 获取资源列表的方法，支持传入分类参数
 const fetchResources = async () => {
   try {
-    // 👉 [修改] 把搜索关键词 keyword 也一起发给后端
     const res = await request.get('/api/resources', { 
       params: { 
         type: activeType.value,
-        keyword: searchQuery.value 
+        keyword: searchQuery.value,
+        page: currentPage.value,
+        limit: pageSize.value
       } 
     })
     
@@ -120,6 +155,7 @@ const fetchResources = async () => {
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
       }))
+      totalItems.value = res.data.total || 0 // 拿到后端算好的总数
     }
   } catch (error) { ElMessage.error('获取资源列表失败') }
 }

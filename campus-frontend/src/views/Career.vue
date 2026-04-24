@@ -111,6 +111,18 @@
         </el-row>
 
         <el-empty v-if="careerList.length === 0" description="暂无相关信息" />
+        <div class="pagination-container" v-if="totalItems > 0">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :page-sizes="[5, 10, 20, 50]"
+            background
+            layout="total, sizes, prev, pager, next, jumper"
+            :total="totalItems"
+            @size-change="handleSizeChange"
+            @current-change="handleCurrentChange"
+          />
+        </div>
       </el-main>
     </el-container>
   </div>
@@ -138,6 +150,28 @@ const publishForm = ref({
   tags: ''
 })
 
+// 👉 [新增] 分页相关变量
+const currentPage = ref(1)
+const pageSize = ref(10)
+const totalItems = ref(0)
+
+// 👉 [新增] 当切换分类或敲击回车搜索时，务必将页码重置为 1
+const handleFilterChange = () => {
+  currentPage.value = 1
+  fetchCareers() // Study里就是 fetchStudyMaterials，Skills里是 fetchResources
+}
+
+// 👉 [新增] 分页组件触发的方法
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  currentPage.value = 1
+  fetchCareers()
+}
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  fetchCareers()
+}
+
 const syncFavoriteIds = (targetId, shouldInclude) => {
   const ids = new Set(myFavoriteIds.value)
   if (shouldInclude) {
@@ -157,11 +191,12 @@ const fetchMyFavorites = async () => {
 }
 const fetchCareers = async () => {
   try {
-    // 👉 [修改] 在请求参数里，把 type 和 keyword 一起发给后端
     const res = await request.get('/api/careers', { 
       params: { 
         type: activeType.value,
-        keyword: searchQuery.value 
+        keyword: searchQuery.value,
+        page: currentPage.value,   // 👉 新增带给后端
+        limit: pageSize.value      // 👉 新增带给后端
       } 
     })
     
@@ -171,8 +206,9 @@ const fetchCareers = async () => {
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
       }))
+      totalItems.value = res.data.total || 0 // 👉 新增：接收后端算好的总数
     }
-  } catch (error) { ElMessage.error('获取就业信息失败') }
+  } catch (error) { ElMessage.error('获取信息失败') }
 }
 
 // 动态返回标签颜色
