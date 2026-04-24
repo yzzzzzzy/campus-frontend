@@ -1571,18 +1571,24 @@ const storage = multer.diskStorage({
     }
 });
 
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+
 const upload = multer({
     storage: storage,
     limits: { fileSize: 2 * 1024 * 1024 }, // 限制 2MB
+    fileFilter: function (req, file, cb) {
+        // 在写盘之前校验 MIME 类型，不合法直接拒绝，不会产生垃圾文件
+        if (!ALLOWED_IMAGE_MIME_TYPES.has(file.mimetype)) {
+            return cb(new Error('仅支持上传 JPG / PNG / GIF / WebP 格式的图片'));
+        }
+        cb(null, true);
+    }
 });
 
-// 2. 创建上传接口
-app.post('/api/upload', upload.single('file'), (req, res) => {
+// 2. 创建上传接口（需要登录，防止未授权用户滥用存储空间）
+app.post('/api/upload', authenticateToken, upload.single('file'), (req, res) => {
     if (!req.file) {
         return res.send({ code: 400, message: '请选择要上传的图片' });
-    }
-    if (!req.file.mimetype || !req.file.mimetype.startsWith('image/')) {
-        return res.send({ code: 400, message: '仅支持上传图片文件' });
     }
     // 优先使用环境变量中的公网地址，未配置时自动使用当前请求域名
     const imgUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
@@ -1645,10 +1651,14 @@ app.delete('/api/user/account', authenticateToken, async (req, res) => {
 
 // 全局兜底：统一返回未捕获异常，避免前端出现静默失败
 app.use((err, req, res, next) => {
-    console.error('未处理异常:', err);
     if (res.headersSent) {
         return next(err);
     }
+    // multer 文件类型或大小校验失败时，返回 400 而非 500
+    if (err && (err.code === 'LIMIT_FILE_SIZE' || err.message?.startsWith('仅支持上传'))) {
+        return sendApiError(res, 400, err.message || '文件不合规，请检查格式和大小');
+    }
+    console.error('未处理异常:', err);
     return sendApiError(res, err?.status || 500, err?.message);
 });
 
