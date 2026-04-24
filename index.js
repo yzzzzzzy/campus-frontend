@@ -764,10 +764,13 @@ app.get('/api/comments/:postId', async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
-// 👉 [新增] 9. 获取个人提升资源列表 (公开接口)
+// 👉 [终极版] 9. 获取个人提升资源列表 (支持分页 + 分类 + 搜索)
 app.get('/api/resources', async (req, res) => {
     try {
-        const { type, keyword } = req.query; // 接收 keyword
+        const { type, keyword } = req.query;
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+        const offset = (page - 1) * limit;
 
         let query = 'SELECT * FROM resources WHERE 1=1';
         const queryParams = [];
@@ -776,23 +779,29 @@ app.get('/api/resources', async (req, res) => {
             query += ' AND type = ?';
             queryParams.push(type);
         }
-
-        // 模糊搜索：匹配资源标题或描述
         if (keyword) {
             query += ' AND (title LIKE ? OR description LIKE ?)';
             const searchStr = `%${keyword}%`;
             queryParams.push(searchStr, searchStr);
         }
 
-        query += ' ORDER BY created_at DESC';
-        const [rows] = await db.query(query, queryParams);
-        res.send({ code: 200, message: '获取资源成功', data: rows });
+        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0].total;
+
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+
+        res.send({ code: 200, message: '获取成功', data: rows, total, page, limit });
     } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
 });
-// 👉 [新增] 10. 获取升学考公资料列表 (公开接口)
+// 👉 [终极版] 10. 获取升学考公资料列表 (支持分页 + 分类 + 搜索)
 app.get('/api/study', async (req, res) => {
     try {
-        const { category, keyword } = req.query; // 接收 keyword
+        const { category, keyword } = req.query;
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+        const offset = (page - 1) * limit;
 
         let query = 'SELECT * FROM study_materials WHERE 1=1';
         const queryParams = [];
@@ -801,17 +810,20 @@ app.get('/api/study', async (req, res) => {
             query += ' AND category = ?';
             queryParams.push(category);
         }
-
-        // 模糊搜索：匹配标题或资料描述
         if (keyword) {
             query += ' AND (title LIKE ? OR description LIKE ?)';
             const searchStr = `%${keyword}%`;
             queryParams.push(searchStr, searchStr);
         }
 
-        query += ' ORDER BY created_at DESC';
-        const [rows] = await db.query(query, queryParams);
-        res.send({ code: 200, message: '获取资料成功', data: rows });
+        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0].total;
+
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+
+        res.send({ code: 200, message: '获取成功', data: rows, total, page, limit });
     } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
 });
 // 👉 [新增] 11. 获取竞赛组队列表 (公开接口)
@@ -952,39 +964,38 @@ app.delete('/api/competitions/:id', authenticateToken, async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
-// 👉 [新增] 12. 获取实习与就业列表 (公开接口)
-// 👉 [升级版] 获取实习与就业列表 (支持分类 + 关键字模糊搜索)
+// 👉 [终极版] 12. 获取实习与就业列表 (支持分页 + 分类 + 搜索)
 app.get('/api/careers', async (req, res) => {
     try {
-        const { type, keyword } = req.query; // 接收前端传来的 type 和 keyword
+        const { type, keyword } = req.query;
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+        const offset = (page - 1) * limit;
 
-        // 技巧：加一个 WHERE 1=1，方便后面随时拼接 AND 条件
         let query = 'SELECT * FROM careers WHERE 1=1';
         const queryParams = [];
 
-        // 1. 如果前端传了分类，加上分类条件
         if (type) {
             query += ' AND type = ?';
             queryParams.push(type);
         }
-
-        // 2. 如果前端传了搜索关键词，加上模糊查询条件 (LIKE)
         if (keyword) {
-            // 我们去匹配：公司名、标题、或者内容里包含这个关键词的记录
             query += ' AND (company LIKE ? OR title LIKE ? OR content LIKE ?)';
-            const searchStr = `%${keyword}%`; // 在两边加上 % 代表模糊匹配
+            const searchStr = `%${keyword}%`;
             queryParams.push(searchStr, searchStr, searchStr);
         }
 
-        query += ' ORDER BY created_at DESC';
+        // 1. 先查总条数
+        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const [countResult] = await db.query(countQuery, queryParams);
+        const total = countResult[0].total;
 
-        const [rows] = await db.query(query, queryParams);
+        // 2. 查当前页数据
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+        const [rows] = await db.query(query, [...queryParams, limit, offset]);
 
-        res.send({ code: 200, message: '获取就业信息成功', data: rows });
-    } catch (error) {
-        console.error('获取就业信息失败:', error);
-        res.status(500).send({ code: 500, message: '服务器内部错误' });
-    }
+        res.send({ code: 200, message: '获取成功', data: rows, total, page, limit });
+    } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
 });
 
 // 👉 [新增] 12.1 分享面试经验 / 管理员后续可扩展发布职业信息

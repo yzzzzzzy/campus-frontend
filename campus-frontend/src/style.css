@@ -60,3 +60,44 @@ body,
   height: 3px;
   border-radius: 3px;
 }
+
+/* ==========================================
+   🚀 全站统一：高级控制台布局 (Filter Container)
+   ========================================== */
+.filter-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  margin-bottom: 25px;
+  padding: 0 25px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.category-tabs {
+  flex: 1;
+  /* 让标签页占满左侧 */
+}
+
+/* 强制隐藏 Element Plus 标签页自带的底线和多余留白 */
+.filter-container .el-tabs__header {
+  margin: 0 !important;
+}
+
+.filter-container .el-tabs__nav-wrap::after {
+  display: none !important;
+}
+
+/* ==========================================
+   全站统一：分页容器样式
+   ========================================== */
+.pagination-container {
+  display: flex;
+  justify-content: center;
+  /* 居中对齐 */
+  margin-top: 30px;
+  /* 与上方列表的间距 */
+  padding-bottom: 20px;
+  /* 底部留白 */
+}
