@@ -33,6 +33,7 @@ const PASSWORD_RESET_REQUEST_STATUS = {
     PENDING: 'pending',
     PROCESSED: 'processed'
 };
+const ADMIN_CREATE_CONFIRM_TEXT = 'CREATE_ADMIN';
 const ALLOWED_RESOURCE_TYPES = ['编程开发', '创意设计', '办公效率'];
 const ALLOWED_STUDY_CATEGORIES = ['考研资料', '考公资料', '四六级'];
 const ALLOWED_CAREER_TYPES = ['校招内推', '实习机会', '面试经验'];
@@ -72,6 +73,7 @@ const toPositiveInt = (value) => {
     return Number.isInteger(num) && num > 0 ? num : null;
 };
 const isHttpUrl = (value) => /^https?:\/\//i.test(value);
+const isStrongPassword = (value) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,50}$/.test(value);
 
 const getTableColumns = async (tableName) => {
     if (tableColumnsCache.has(tableName)) {
@@ -693,6 +695,82 @@ app.get('/api/admin/users', isAdmin, async (req, res) => {
         });
     } catch (error) {
         console.error('获取用户列表失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员创建管理员账号（严格校验）
+app.post('/api/admin/users/create-admin', isAdmin, async (req, res) => {
+    try {
+        const username = normalizeString(req.body.username);
+        const password = normalizeString(req.body.password);
+        const confirmPassword = normalizeString(req.body.confirmPassword);
+        const nickname = normalizeString(req.body.nickname);
+        const currentAdminPassword = normalizeString(req.body.currentAdminPassword);
+        const confirmText = normalizeString(req.body.confirmText);
+
+        if (!username || !password || !confirmPassword || !nickname || !currentAdminPassword || !confirmText) {
+            return res.send({ code: 400, message: '请完整填写管理员创建信息' });
+        }
+        if (username.length > 50 || nickname.length > 50) {
+            return res.send({ code: 400, message: '账号或昵称长度不能超过50个字符' });
+        }
+        if (confirmText !== ADMIN_CREATE_CONFIRM_TEXT) {
+            return res.send({ code: 400, message: `确认口令不正确，请输入 ${ADMIN_CREATE_CONFIRM_TEXT}` });
+        }
+        if (password !== confirmPassword) {
+            return res.send({ code: 400, message: '两次输入的新密码不一致' });
+        }
+        if (!isStrongPassword(password)) {
+            return res.send({ code: 400, message: '管理员密码需8-50位，且包含大小写字母、数字和特殊字符' });
+        }
+
+        const [currentAdminRows] = await db.query(
+            'SELECT id, password, role, status FROM users WHERE id = ? LIMIT 1',
+            [req.user.id]
+        );
+
+        if (currentAdminRows.length === 0) {
+            return res.send({ code: 404, message: '当前管理员账号不存在' });
+        }
+
+        const currentAdmin = currentAdminRows[0];
+        if (Number(currentAdmin.role) !== 1 || Number(currentAdmin.status) !== 1) {
+            return res.status(403).send({ code: 403, message: '当前账号无权执行此操作' });
+        }
+
+        const isCurrentAdminPasswordValid = bcrypt.compareSync(currentAdminPassword, currentAdmin.password);
+        if (!isCurrentAdminPasswordValid) {
+            return res.send({ code: 400, message: '当前管理员密码校验失败' });
+        }
+
+        const [existingUsers] = await db.query('SELECT id FROM users WHERE username = ? LIMIT 1', [username]);
+        if (existingUsers.length > 0) {
+            return res.send({ code: 400, message: '该账号已存在，请更换后重试' });
+        }
+
+        const salt = bcrypt.genSaltSync(10);
+        const hashedPassword = bcrypt.hashSync(password, salt);
+
+        const [insertResult] = await db.query(
+            `INSERT INTO users (username, password, nickname, major, skills, role, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [username, hashedPassword, nickname, null, null, 1, 1]
+        );
+
+        res.send({
+            code: 200,
+            message: '管理员账号创建成功',
+            data: {
+                id: insertResult.insertId,
+                username,
+                nickname,
+                role: 1,
+                status: 1
+            }
+        });
+    } catch (error) {
+        console.error('创建管理员账号失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
