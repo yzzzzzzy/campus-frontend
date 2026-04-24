@@ -469,7 +469,7 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
 // 👉 [新增] 管理员数据面板统计
 app.get('/api/admin/stats', isAdmin, async (req, res) => {
     try {
-        const [[userStats], [postStats]] = await Promise.all([
+        const [[userStats], [postStats], [resourceStats], [studyStats], [careerStats], [resetRequestStats], [usersTrendRows], [postsTrendRows], [resourcesTrendRows], [studyTrendRows], [careersTrendRows], [operationLogRows]] = await Promise.all([
             db.query(`
                 SELECT
                     COUNT(*) AS totalUsers,
@@ -483,8 +483,139 @@ app.get('/api/admin/stats', isAdmin, async (req, res) => {
                     COUNT(*) AS totalPosts,
                     SUM(CASE WHEN DATE(created_at) = CURDATE() THEN 1 ELSE 0 END) AS todayPosts
                 FROM posts
+            `),
+            db.query(`
+                SELECT COUNT(*) AS totalResources
+                FROM resources
+            `),
+            db.query(`
+                SELECT COUNT(*) AS totalStudyMaterials
+                FROM study_materials
+            `),
+            db.query(`
+                SELECT COUNT(*) AS totalCareerItems
+                FROM careers
+            `),
+            db.query(`
+                SELECT COUNT(*) AS pendingResetRequests
+                FROM password_reset_requests
+                WHERE status = 'pending'
+            `),
+            db.query(`
+                SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
+                FROM users
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+            `),
+            db.query(`
+                SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
+                FROM posts
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+            `),
+            db.query(`
+                SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
+                FROM resources
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+            `),
+            db.query(`
+                SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
+                FROM study_materials
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+            `),
+            db.query(`
+                SELECT DATE_FORMAT(created_at, '%Y-%m-%d') AS date, COUNT(*) AS count
+                FROM careers
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
+            `),
+            db.query(`
+                SELECT action_time, action_type, detail
+                FROM (
+                    SELECT created_at AS action_time, '帖子发布' AS action_type, CONCAT('《', title, '》') AS detail
+                    FROM posts
+
+                    UNION ALL
+
+                    SELECT created_at AS action_time, '资源发布' AS action_type, title AS detail
+                    FROM resources
+
+                    UNION ALL
+
+                    SELECT created_at AS action_time, '资料发布' AS action_type, title AS detail
+                    FROM study_materials
+
+                    UNION ALL
+
+                    SELECT created_at AS action_time, '就业信息发布' AS action_type, title AS detail
+                    FROM careers
+
+                    UNION ALL
+
+                    SELECT processed_at AS action_time, '申诉处理' AS action_type, CONCAT('账号 ', username, ' 的找回请求已处理') AS detail
+                    FROM password_reset_requests
+                    WHERE status = 'processed' AND processed_at IS NOT NULL
+                ) t
+                ORDER BY action_time DESC
+                LIMIT 20
             `)
         ]);
+
+        const totalPosts = Number(postStats[0]?.totalPosts || 0);
+        const totalResources = Number(resourceStats[0]?.totalResources || 0);
+        const totalStudyMaterials = Number(studyStats[0]?.totalStudyMaterials || 0);
+        const totalCareerItems = Number(careerStats[0]?.totalCareerItems || 0);
+
+        const formatLocalDate = (date) => {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+
+        const dayLabels = Array.from({ length: 7 }, (_, index) => {
+            const date = new Date();
+            date.setHours(0, 0, 0, 0);
+            date.setDate(date.getDate() - (6 - index));
+            return formatLocalDate(date);
+        });
+
+        const toCountMap = (rows) => rows.reduce((map, row) => {
+            const dateKey = row.date;
+            map[dateKey] = Number(row.count || 0);
+            return map;
+        }, {});
+
+        const usersTrendMap = toCountMap(usersTrendRows);
+        const postsTrendMap = toCountMap(postsTrendRows);
+        const resourcesTrendMap = toCountMap(resourcesTrendRows);
+        const studyTrendMap = toCountMap(studyTrendRows);
+        const careersTrendMap = toCountMap(careersTrendRows);
+
+        const trend7Days = dayLabels.map((date) => {
+            const users = usersTrendMap[date] || 0;
+            const posts = postsTrendMap[date] || 0;
+            const resources = resourcesTrendMap[date] || 0;
+            const studyMaterials = studyTrendMap[date] || 0;
+            const careers = careersTrendMap[date] || 0;
+            return {
+                date,
+                users,
+                posts,
+                resources,
+                studyMaterials,
+                careers,
+                totalContent: posts + resources + studyMaterials + careers
+            };
+        });
+
+        const operationLogs = operationLogRows.map((row) => ({
+            actionTime: row.action_time,
+            actionType: row.action_type,
+            detail: row.detail
+        }));
 
         res.send({
             code: 200,
@@ -494,8 +625,15 @@ app.get('/api/admin/stats', isAdmin, async (req, res) => {
                 activeUsers: Number(userStats[0]?.activeUsers || 0),
                 bannedUsers: Number(userStats[0]?.bannedUsers || 0),
                 adminUsers: Number(userStats[0]?.adminUsers || 0),
-                totalPosts: Number(postStats[0]?.totalPosts || 0),
-                todayPosts: Number(postStats[0]?.todayPosts || 0)
+                totalPosts,
+                todayPosts: Number(postStats[0]?.todayPosts || 0),
+                totalResources,
+                totalStudyMaterials,
+                totalCareerItems,
+                totalContent: totalPosts + totalResources + totalStudyMaterials + totalCareerItems,
+                pendingResetRequests: Number(resetRequestStats[0]?.pendingResetRequests || 0),
+                trend7Days,
+                operationLogs
             }
         });
     } catch (error) {
