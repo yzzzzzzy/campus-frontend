@@ -14,7 +14,7 @@ let isShowingGlobalError = false
 
 const STATUS_MESSAGES = {
     401: '登录状态已失效，请重新登录',
-    403: '无权限访问该资源，请重新登录后重试',
+    403: '无权限访问该资源',
     500: '服务器开小差了，请稍后重试'
 }
 
@@ -29,6 +29,7 @@ const showGlobalError = (message) => {
 
 const forceLogoutToLogin = (message) => {
     localStorage.removeItem('token')
+    localStorage.removeItem('user')
 
     if (!isRedirectingToLogin) {
         isRedirectingToLogin = true
@@ -68,8 +69,13 @@ request.interceptors.response.use(
         const code = error?.response?.data?.code
         const message = error?.response?.data?.message
 
-        if (status === 401 || status === 403 || code === 401 || code === 403) {
+        if (status === 401 || code === 401) {
             forceLogoutToLogin(message || STATUS_MESSAGES[status] || STATUS_MESSAGES[code])
+            return Promise.reject(error)
+        }
+
+        if (status === 403 || code === 403) {
+            showGlobalError(message || STATUS_MESSAGES[403])
             return Promise.reject(error)
         }
 

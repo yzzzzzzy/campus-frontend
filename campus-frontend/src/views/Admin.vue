@@ -149,6 +149,19 @@
                   </template>
                 </el-table-column>
               </el-table>
+
+              <div class="pagination-row" v-if="userPagination.total > 0">
+                <el-pagination
+                  v-model:current-page="userPagination.page"
+                  v-model:page-size="userPagination.limit"
+                  :page-sizes="[10, 20, 50, 100]"
+                  background
+                  layout="total, sizes, prev, pager, next"
+                  :total="userPagination.total"
+                  @size-change="handleUserPageSizeChange"
+                  @current-change="handleUserPageChange"
+                />
+              </div>
             </el-card>
           </section>
 
@@ -179,6 +192,19 @@
                   </template>
                 </el-table-column>
               </el-table>
+
+              <div class="pagination-row" v-if="postPagination.total > 0">
+                <el-pagination
+                  v-model:current-page="postPagination.page"
+                  v-model:page-size="postPagination.limit"
+                  :page-sizes="[10, 20, 50, 100]"
+                  background
+                  layout="total, sizes, prev, pager, next"
+                  :total="postPagination.total"
+                  @size-change="handlePostPageSizeChange"
+                  @current-change="handlePostPageChange"
+                />
+              </div>
             </el-card>
           </section>
 
@@ -378,6 +404,16 @@ const stats = ref({
 const users = ref([])
 const posts = ref([])
 const resetRequests = ref([])
+const userPagination = reactive({
+  page: 1,
+  limit: 10,
+  total: 0
+})
+const postPagination = reactive({
+  page: 1,
+  limit: 10,
+  total: 0
+})
 
 const userFilters = reactive({
   keyword: '',
@@ -466,14 +502,18 @@ const loadUsers = async () => {
     const res = await request.get('/api/admin/users', {
       params: {
         keyword: userFilters.keyword,
-        status: userFilters.status
+        status: userFilters.status,
+        page: userPagination.page,
+        limit: userPagination.limit
       }
     })
     if (res.data.code === 200) {
       users.value = res.data.data
+      userPagination.total = Number(res.data.total || 0)
     }
   } catch (error) {
     users.value = []
+    userPagination.total = 0
     handleAdminApiError(error)
   } finally {
     usersLoading.value = false
@@ -486,18 +526,44 @@ const loadPosts = async () => {
     const res = await request.get('/api/admin/posts', {
       params: {
         keyword: postFilters.keyword,
-        username: postFilters.username
+        username: postFilters.username,
+        page: postPagination.page,
+        limit: postPagination.limit
       }
     })
     if (res.data.code === 200) {
       posts.value = res.data.data
+      postPagination.total = Number(res.data.total || 0)
     }
   } catch (error) {
     posts.value = []
+    postPagination.total = 0
     handleAdminApiError(error)
   } finally {
     postsLoading.value = false
   }
+}
+
+const handleUserPageChange = async (page) => {
+  userPagination.page = page
+  await loadUsers()
+}
+
+const handleUserPageSizeChange = async (size) => {
+  userPagination.limit = size
+  userPagination.page = 1
+  await loadUsers()
+}
+
+const handlePostPageChange = async (page) => {
+  postPagination.page = page
+  await loadPosts()
+}
+
+const handlePostPageSizeChange = async (size) => {
+  postPagination.limit = size
+  postPagination.page = 1
+  await loadPosts()
 }
 
 const loadResetRequests = async () => {
@@ -1022,6 +1088,12 @@ onMounted(async () => {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.pagination-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .request-message {
