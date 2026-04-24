@@ -136,17 +136,7 @@
               </el-card>
             </div>
 
-            <el-card class="panel-card" shadow="never">
-              <template #header>
-                <div class="panel-header">
-                  <span>系统概览</span>
-                  <el-tag type="info" effect="plain">实时统计</el-tag>
-                </div>
-              </template>
-              <div class="overview-note">
-                现在概览已接入用户、帖子、资源、资料、招聘和待处理申诉的实时统计。后续如果你需要，我可以继续加最近7天趋势图和操作日志。
-              </div>
-            </el-card>
+            
 
             <div class="overview-grid trend-log-grid">
               <el-card class="panel-card overview-panel" shadow="never">
@@ -1089,10 +1079,16 @@ onMounted(async () => {
 .admin-shell {
   position: relative;
   z-index: 1;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .admin-aside {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1182,6 +1178,8 @@ onMounted(async () => {
 
 .admin-main-wrap {
   min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
 }
 
 .admin-topbar {
@@ -1522,10 +1520,21 @@ onMounted(async () => {
 @media (max-width: 920px) {
   .admin-shell {
     display: block;
+    height: auto;
+    overflow: visible;
   }
 
   .admin-aside {
+    position: static;
+    top: auto;
+    height: auto;
+    overflow: visible;
     width: auto !important;
+  }
+
+  .admin-main-wrap {
+    height: auto;
+    overflow: visible;
   }
 
   .admin-topbar,
