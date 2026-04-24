@@ -354,15 +354,14 @@ const handleDeletePost = async (post) => {
     if (error !== 'cancel') ElMessage.error('网络请求失败')
   }
 }
-// 准备上传所需的请求头（因为我们后端有 JWT 校验）
-const uploadHeaders = {
-  Authorization: `Bearer ${localStorage.getItem('token')}`
-};
+// 准备上传所需的请求头（保持 token 读取为实时值）
+const uploadHeaders = computed(() => ({
+  Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+}))
 
 // 上传成功的回调
 const handleAvatarSuccess = (response) => {
   if (!isPageActive.value) return
-  console.log('后端返回的数据:', response) // 打印出来看！
   
   if (response.code === 200) {
     settingsForm.value.avatar = response.url
@@ -373,7 +372,7 @@ const handleAvatarSuccess = (response) => {
 }
 // 👉 新增：增加失败回调，抓住被隐藏的错误！
 const handleAvatarError = (error) => {
-  console.error('上传直接报错了:', error)
+  console.error('头像上传失败:', error)
   ElMessage.error('网络请求失败，请打开 F12 查看控制台')
 }
 // 上传前的校验

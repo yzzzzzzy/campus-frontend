@@ -21,6 +21,7 @@ const PASSWORD_RESET_REQUEST_WINDOW_MS = 60 * 1000;
 const PASSWORD_RESET_REQUEST_ACCOUNT_MAX = 1;
 const PASSWORD_RESET_REQUEST_IP_MAX = 3;
 const SERVER_PUBLIC_BASE_URL = (process.env.SERVER_PUBLIC_BASE_URL || '').replace(/\/+$/, '');
+const CORS_ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(item => item.trim()).filter(Boolean);
 
 const API_ERROR_MESSAGES = {
     401: '登录状态已失效，请重新登录',
@@ -35,6 +36,7 @@ const PASSWORD_RESET_REQUEST_STATUS = {
 const ALLOWED_RESOURCE_TYPES = ['编程开发', '创意设计', '办公效率'];
 const ALLOWED_STUDY_CATEGORIES = ['考研资料', '考公资料', '四六级'];
 const ALLOWED_CAREER_TYPES = ['校招内推', '实习机会', '面试经验'];
+const ALLOWED_UPLOAD_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const tableColumnsCache = new Map();
 
 const sendApiError = (res, status = 500, message, extra = {}) => {
@@ -110,7 +112,18 @@ const insertWithExistingColumns = async (tableName, fieldMap, requiredKeys = [])
 };
 
 
-app.use(cors());
+app.use(cors({
+    origin: (origin, callback) => {
+        // 未配置白名单时保持开发环境兼容；生产请在 .env 显式配置 CORS_ALLOWED_ORIGINS
+        if (CORS_ALLOWED_ORIGINS.length === 0) {
+            return callback(null, true);
+        }
+        if (!origin || CORS_ALLOWED_ORIGINS.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error('CORS origin not allowed'));
+    }
+}));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -179,7 +192,7 @@ app.post('/api/register', async (req, res) => {
 
         // 3. 核心考点：密码加密（加盐）
         const salt = bcrypt.genSaltSync(10);
-        const hashedPassword = bcrypt.hashSync(password, salt);
+        const hashedPassword = bcrypt.hashSync(normalizedPassword, salt);
 
         // 4. 将新用户存入数据库 (注意这里存的是加密后的密码)
         await db.query(
@@ -496,6 +509,9 @@ app.get('/api/admin/users', isAdmin, async (req, res) => {
     try {
         const keyword = normalizeString(req.query.keyword);
         const status = normalizeStatus(req.query.status);
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+        const offset = (page - 1) * limit;
 
         let whereClause = 'WHERE 1=1';
         const queryParams = [];
@@ -510,15 +526,33 @@ app.get('/api/admin/users', isAdmin, async (req, res) => {
             queryParams.push(status);
         }
 
-        const query = `
+        const countQuery = `
+            SELECT COUNT(*) AS total
+            FROM users
+            ${whereClause}
+        `;
+
+        const dataQuery = `
             SELECT id, username, nickname, major, skills, role, status, created_at
             FROM users
             ${whereClause}
             ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
         `;
 
-        const [rows] = await db.query(query, queryParams);
-        res.send({ code: 200, message: '获取成功', data: rows });
+        const [[countRows], [rows]] = await Promise.all([
+            db.query(countQuery, queryParams),
+            db.query(dataQuery, [...queryParams, limit, offset])
+        ]);
+
+        res.send({
+            code: 200,
+            message: '获取成功',
+            data: rows,
+            total: Number(countRows[0]?.total || 0),
+            page,
+            limit
+        });
     } catch (error) {
         console.error('获取用户列表失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
@@ -680,6 +714,9 @@ app.get('/api/admin/posts', isAdmin, async (req, res) => {
     try {
         const keyword = normalizeString(req.query.keyword);
         const authorUsername = normalizeString(req.query.username);
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+        const offset = (page - 1) * limit;
 
         let whereClause = 'WHERE 1=1';
         const queryParams = [];
@@ -694,7 +731,14 @@ app.get('/api/admin/posts', isAdmin, async (req, res) => {
             queryParams.push(authorUsername);
         }
 
-        const query = `
+        const countQuery = `
+            SELECT COUNT(*) AS total
+            FROM posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            ${whereClause}
+        `;
+
+        const dataQuery = `
             SELECT
                 p.id,
                 p.title,
@@ -710,10 +754,22 @@ app.get('/api/admin/posts', isAdmin, async (req, res) => {
             LEFT JOIN categories c ON p.category_id = c.id
             ${whereClause}
             ORDER BY p.created_at DESC
+            LIMIT ? OFFSET ?
         `;
 
-        const [rows] = await db.query(query, queryParams);
-        res.send({ code: 200, message: '获取成功', data: rows });
+        const [[countRows], [rows]] = await Promise.all([
+            db.query(countQuery, queryParams),
+            db.query(dataQuery, [...queryParams, limit, offset])
+        ]);
+
+        res.send({
+            code: 200,
+            message: '获取成功',
+            data: rows,
+            total: Number(countRows[0]?.total || 0),
+            page,
+            limit
+        });
     } catch (error) {
         console.error('获取帖子列表失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
@@ -984,25 +1040,25 @@ app.get('/api/resources', async (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
         const offset = (page - 1) * limit;
 
-        let query = 'SELECT * FROM resources WHERE 1=1';
+        let whereClause = 'WHERE 1=1';
         const queryParams = [];
 
         if (type) {
-            query += ' AND type = ?';
+            whereClause += ' AND type = ?';
             queryParams.push(type);
         }
         if (keyword) {
-            query += ' AND (title LIKE ? OR description LIKE ?)';
+            whereClause += ' AND (title LIKE ? OR description LIKE ?)';
             const searchStr = `%${keyword}%`;
             queryParams.push(searchStr, searchStr);
         }
 
-        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const countQuery = `SELECT COUNT(*) AS total FROM resources ${whereClause}`;
         const [countResult] = await db.query(countQuery, queryParams);
         const total = countResult[0].total;
 
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+        const dataQuery = `SELECT * FROM resources ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+        const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
 
         res.send({ code: 200, message: '获取成功', data: rows, total, page, limit });
     } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
@@ -1015,25 +1071,25 @@ app.get('/api/study', async (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
         const offset = (page - 1) * limit;
 
-        let query = 'SELECT * FROM study_materials WHERE 1=1';
+        let whereClause = 'WHERE 1=1';
         const queryParams = [];
 
         if (category) {
-            query += ' AND category = ?';
+            whereClause += ' AND category = ?';
             queryParams.push(category);
         }
         if (keyword) {
-            query += ' AND (title LIKE ? OR description LIKE ?)';
+            whereClause += ' AND (title LIKE ? OR description LIKE ?)';
             const searchStr = `%${keyword}%`;
             queryParams.push(searchStr, searchStr);
         }
 
-        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const countQuery = `SELECT COUNT(*) AS total FROM study_materials ${whereClause}`;
         const [countResult] = await db.query(countQuery, queryParams);
         const total = countResult[0].total;
 
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+        const dataQuery = `SELECT * FROM study_materials ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+        const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
 
         res.send({ code: 200, message: '获取成功', data: rows, total, page, limit });
     } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
@@ -1046,21 +1102,21 @@ app.get('/api/competitions', async (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
         const offset = (page - 1) * limit;
 
-        let query = 'SELECT * FROM competitions';
+        let whereClause = '';
         const queryParams = [];
 
         if (status) {
-            query += ' WHERE status = ?';
+            whereClause = ' WHERE status = ?';
             queryParams.push(status);
         }
 
-        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const countQuery = `SELECT COUNT(*) AS total FROM competitions${whereClause}`;
         const [countRows] = await db.query(countQuery, queryParams);
         const total = countRows[0]?.total || 0;
 
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+        const dataQuery = `SELECT * FROM competitions${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
 
-        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+        const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
 
         res.send({
             code: 200,
@@ -1156,9 +1212,13 @@ app.post('/api/competitions', authenticateToken, async (req, res) => {
 // 👉 [新增] 11-3. 删除自己的竞赛招募
 app.delete('/api/competitions/:id', authenticateToken, async (req, res) => {
     try {
-        const compId = req.params.id;
+        const compId = toPositiveInt(req.params.id);
         const userId = req.user.id;
         const adminDeleting = Number(req.user.role) === 1;
+
+        if (!compId) {
+            return res.send({ code: 400, message: '记录ID格式不正确' });
+        }
 
         const [comps] = await db.query('SELECT user_id FROM competitions WHERE id = ?', [compId]);
         if (comps.length === 0) return res.send({ code: 404, message: '记录不存在' });
@@ -1184,27 +1244,27 @@ app.get('/api/careers', async (req, res) => {
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
         const offset = (page - 1) * limit;
 
-        let query = 'SELECT * FROM careers WHERE 1=1';
+        let whereClause = 'WHERE 1=1';
         const queryParams = [];
 
         if (type) {
-            query += ' AND type = ?';
+            whereClause += ' AND type = ?';
             queryParams.push(type);
         }
         if (keyword) {
-            query += ' AND (company LIKE ? OR title LIKE ? OR content LIKE ?)';
+            whereClause += ' AND (company LIKE ? OR title LIKE ? OR content LIKE ?)';
             const searchStr = `%${keyword}%`;
             queryParams.push(searchStr, searchStr, searchStr);
         }
 
         // 1. 先查总条数
-        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) AS total');
+        const countQuery = `SELECT COUNT(*) AS total FROM careers ${whereClause}`;
         const [countResult] = await db.query(countQuery, queryParams);
         const total = countResult[0].total;
 
         // 2. 查当前页数据
-        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-        const [rows] = await db.query(query, [...queryParams, limit, offset]);
+        const dataQuery = `SELECT * FROM careers ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+        const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
 
         res.send({ code: 200, message: '获取成功', data: rows, total, page, limit });
     } catch (error) { res.status(500).send({ code: 500, message: '内部错误' }); }
@@ -1266,9 +1326,13 @@ app.post('/api/careers', authenticateToken, async (req, res) => {
 // 👉 [新增] 12.2 删除实习与就业信息
 app.delete('/api/careers/:id', authenticateToken, async (req, res) => {
     try {
-        const careerId = req.params.id;
+        const careerId = toPositiveInt(req.params.id);
         const userId = req.user.id;
         const adminDeleting = Number(req.user.role) === 1;
+
+        if (!careerId) {
+            return res.send({ code: 400, message: '记录ID格式不正确' });
+        }
 
         // 1. 查一下这条信息是不是当前登录用户发的
         const [careers] = await db.query('SELECT user_id FROM careers WHERE id = ?', [careerId]);
@@ -1573,20 +1637,33 @@ const storage = multer.diskStorage({
 
 const upload = multer({
     storage: storage,
+    fileFilter: (req, file, cb) => {
+        if (!file || !ALLOWED_UPLOAD_MIME_TYPES.includes(file.mimetype)) {
+            return cb(new Error('仅支持上传 JPG/PNG/GIF/WEBP 图片'));
+        }
+        return cb(null, true);
+    },
     limits: { fileSize: 2 * 1024 * 1024 }, // 限制 2MB
 });
 
 // 2. 创建上传接口
-app.post('/api/upload', upload.single('file'), (req, res) => {
-    if (!req.file) {
-        return res.send({ code: 400, message: '请选择要上传的图片' });
-    }
-    if (!req.file.mimetype || !req.file.mimetype.startsWith('image/')) {
-        return res.send({ code: 400, message: '仅支持上传图片文件' });
-    }
-    // 优先使用环境变量中的公网地址，未配置时自动使用当前请求域名
-    const imgUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
-    res.send({ code: 200, message: '上传成功', url: imgUrl });
+app.post('/api/upload', authenticateToken, (req, res) => {
+    upload.single('file')(req, res, (error) => {
+        if (error) {
+            if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+                return res.send({ code: 400, message: '图片大小不能超过 2MB' });
+            }
+            return res.send({ code: 400, message: error.message || '上传失败，请检查文件格式' });
+        }
+
+        if (!req.file) {
+            return res.send({ code: 400, message: '请选择要上传的图片' });
+        }
+
+        // 优先使用环境变量中的公网地址，未配置时自动使用当前请求域名
+        const imgUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
+        return res.send({ code: 200, message: '上传成功', url: imgUrl });
+    });
 });
 // 👉 [新增] 账号注销接口 (使用数据库事务)
 app.delete('/api/user/account', authenticateToken, async (req, res) => {
