@@ -84,6 +84,58 @@
               </el-card>
             </div>
 
+            <div class="overview-grid">
+              <el-card class="panel-card overview-panel" shadow="never">
+                <template #header>
+                  <div class="panel-header">
+                    <span>内容分布</span>
+                    <el-tag type="warning" effect="plain">全站内容总览</el-tag>
+                  </div>
+                </template>
+
+                <div class="breakdown-list">
+                  <div v-for="item in contentBreakdown" :key="item.label" class="breakdown-item">
+                    <div class="breakdown-head">
+                      <div>
+                        <div class="breakdown-label">{{ item.label }}</div>
+                        <div class="breakdown-meta">{{ item.count }} 条</div>
+                      </div>
+                      <div class="breakdown-ratio">{{ item.ratio }}%</div>
+                    </div>
+                    <el-progress :percentage="item.ratio" :stroke-width="10" :color="item.color" />
+                  </div>
+                </div>
+              </el-card>
+
+              <el-card class="panel-card overview-panel" shadow="never">
+                <template #header>
+                  <div class="panel-header">
+                    <span>待处理事项</span>
+                    <el-tag type="danger" effect="plain">需要关注</el-tag>
+                  </div>
+                </template>
+
+                <el-empty v-if="pendingActions.length === 0" description="当前没有需要立即处理的事项" :image-size="110" />
+
+                <div v-else class="pending-list">
+                  <div v-for="item in pendingActions" :key="item.label" class="pending-item" :class="item.level">
+                    <div class="pending-title-row">
+                      <span class="pending-title">{{ item.label }}</span>
+                      <el-tag :type="item.tagType" effect="dark" size="small">{{ item.badge }}</el-tag>
+                    </div>
+                    <div class="pending-desc">{{ item.description }}</div>
+                  </div>
+                </div>
+
+                <div class="shortcut-actions">
+                  <el-button type="primary" plain @click="activeSection = 'publish'">发布内容</el-button>
+                  <el-button plain @click="activeSection = 'posts'">内容审核</el-button>
+                  <el-button plain @click="activeSection = 'users'">用户管理</el-button>
+                  <el-button plain @click="activeSection = 'resetRequests'">密码申诉</el-button>
+                </div>
+              </el-card>
+            </div>
+
             <el-card class="panel-card" shadow="never">
               <template #header>
                 <div class="panel-header">
@@ -92,9 +144,58 @@
                 </div>
               </template>
               <div class="overview-note">
-                这里先放最核心的总览指标，后续可以继续扩展访问趋势、举报处理量和活跃度曲线。
+                现在概览已接入用户、帖子、资源、资料、招聘和待处理申诉的实时统计。后续如果你需要，我可以继续加最近7天趋势图和操作日志。
               </div>
             </el-card>
+
+            <div class="overview-grid trend-log-grid">
+              <el-card class="panel-card overview-panel" shadow="never">
+                <template #header>
+                  <div class="panel-header">
+                    <span>最近7天趋势</span>
+                    <el-tag type="success" effect="plain">每日新增内容</el-tag>
+                  </div>
+                </template>
+
+                <el-empty v-if="trendViewData.length === 0" description="暂无趋势数据" :image-size="100" />
+
+                <div v-else class="trend-chart">
+                  <div v-for="item in trendViewData" :key="item.date" class="trend-col">
+                    <div class="trend-bar-wrap">
+                      <div class="trend-bar" :style="{ height: `${item.ratio}%` }"></div>
+                    </div>
+                    <div class="trend-value">{{ item.totalContent }}</div>
+                    <div class="trend-label">{{ item.shortDate }}</div>
+                  </div>
+                </div>
+
+                <div class="trend-legend">
+                  <span>总量：{{ stats.totalContent || 0 }}</span>
+                  <span>7日新增：{{ sevenDayNewContent }}</span>
+                </div>
+              </el-card>
+
+              <el-card class="panel-card overview-panel" shadow="never">
+                <template #header>
+                  <div class="panel-header">
+                    <span>操作日志</span>
+                    <el-tag type="info" effect="plain">最近20条</el-tag>
+                  </div>
+                </template>
+
+                <el-empty v-if="operationLogs.length === 0" description="暂无操作日志" :image-size="100" />
+
+                <div v-else class="log-list">
+                  <div v-for="(log, index) in operationLogs" :key="`${log.actionTime}-${index}`" class="log-item">
+                    <div class="log-head">
+                      <el-tag size="small" effect="plain">{{ log.actionType }}</el-tag>
+                      <span class="log-time">{{ formatDateTime(log.actionTime) }}</span>
+                    </div>
+                    <div class="log-detail">{{ log.detail }}</div>
+                  </div>
+                </div>
+              </el-card>
+            </div>
           </section>
 
           <section v-else-if="activeSection === 'users'" class="table-section">
@@ -398,7 +499,14 @@ const stats = ref({
   bannedUsers: 0,
   adminUsers: 0,
   totalPosts: 0,
-  todayPosts: 0
+  todayPosts: 0,
+  totalResources: 0,
+  totalStudyMaterials: 0,
+  totalCareerItems: 0,
+  totalContent: 0,
+  pendingResetRequests: 0,
+  trend7Days: [],
+  operationLogs: []
 })
 
 const users = ref([])
@@ -474,8 +582,106 @@ const statCards = computed(() => ([
   { label: '封禁账号', value: stats.value.bannedUsers, hint: '已限制登录账号' },
   { label: '管理员', value: stats.value.adminUsers, hint: '后台可用账号' },
   { label: '总帖子数', value: stats.value.totalPosts, hint: '全站内容库存' },
-  { label: '今日新增', value: stats.value.todayPosts, hint: '当天发布内容' }
+  { label: '今日新增', value: stats.value.todayPosts, hint: '当天发布帖子' },
+  { label: '资源数量', value: stats.value.totalResources, hint: '个人提升资源' },
+  { label: '资料数量', value: stats.value.totalStudyMaterials, hint: '升学考公资料' },
+  { label: '招聘信息', value: stats.value.totalCareerItems, hint: '实习/面经内容' },
+  { label: '待处理申诉', value: stats.value.pendingResetRequests, hint: '密码找回留言' }
 ]))
+
+const contentBreakdown = computed(() => {
+  const items = [
+    { label: '论坛帖子', count: Number(stats.value.totalPosts || 0), color: '#409EFF' },
+    { label: '个人提升资源', count: Number(stats.value.totalResources || 0), color: '#9C27B0' },
+    { label: '升学考公资料', count: Number(stats.value.totalStudyMaterials || 0), color: '#67C23A' },
+    { label: '招聘与面经', count: Number(stats.value.totalCareerItems || 0), color: '#E6A23C' }
+  ]
+
+  const backendTotal = Number(stats.value.totalContent || 0)
+  const itemsTotal = items.reduce((sum, item) => sum + item.count, 0)
+  const total = Math.max(backendTotal || itemsTotal, 1)
+
+  return items.map((item) => ({
+    ...item,
+    ratio: Math.min(100, Math.max(0, Number(((item.count / total) * 100).toFixed(1))))
+  }))
+})
+
+const pendingActions = computed(() => {
+  const actions = []
+
+  if (Number(stats.value.pendingResetRequests || 0) > 0) {
+    actions.push({
+      label: '密码申诉待处理',
+      badge: `${stats.value.pendingResetRequests} 条`,
+      tagType: 'danger',
+      level: 'urgent',
+      description: '有用户提交了找回密码留言，需要管理员尽快审核并处理。'
+    })
+  }
+
+  if (Number(stats.value.bannedUsers || 0) > 0) {
+    actions.push({
+      label: '封禁账号复核',
+      badge: `${stats.value.bannedUsers} 个`,
+      tagType: 'warning',
+      level: 'warning',
+      description: '当前存在被封禁账号，建议结合用户检索确认是否需要复核。'
+    })
+  }
+
+  if (Number(stats.value.todayPosts || 0) > 0) {
+    actions.push({
+      label: '今日新增内容',
+      badge: `${stats.value.todayPosts} 条`,
+      tagType: 'success',
+      level: 'info',
+      description: '今天平台已有新的帖子发布，可前往内容审核查看详情。'
+    })
+  }
+
+  return actions
+})
+
+const trendViewData = computed(() => {
+  const raw = Array.isArray(stats.value.trend7Days) ? stats.value.trend7Days : []
+  if (raw.length === 0) return []
+
+  const safeRows = raw.map((item) => ({
+    date: item.date,
+    shortDate: String(item.date || '').slice(5),
+    totalContent: Number(item.totalContent || 0)
+  }))
+
+  const maxValue = Math.max(...safeRows.map((item) => item.totalContent), 1)
+
+  return safeRows.map((item) => ({
+    ...item,
+    ratio: Math.max(10, Number(((item.totalContent / maxValue) * 100).toFixed(1)))
+  }))
+})
+
+const sevenDayNewContent = computed(() => {
+  return trendViewData.value.reduce((sum, item) => sum + Number(item.totalContent || 0), 0)
+})
+
+const operationLogs = computed(() => {
+  return Array.isArray(stats.value.operationLogs) ? stats.value.operationLogs : []
+})
+
+const formatDateTime = (value) => {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '--'
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 
 const refreshCurrentUser = () => {
   try {
@@ -489,7 +695,12 @@ const loadStats = async () => {
   try {
     const res = await request.get('/api/admin/stats')
     if (res.data.code === 200) {
-      stats.value = res.data.data
+      stats.value = {
+        ...stats.value,
+        ...res.data.data,
+        trend7Days: Array.isArray(res.data.data?.trend7Days) ? res.data.data.trend7Days : [],
+        operationLogs: Array.isArray(res.data.data?.operationLogs) ? res.data.data.operationLogs : []
+      }
     }
   } catch (error) {
     handleAdminApiError(error)
@@ -1074,6 +1285,165 @@ onMounted(async () => {
   line-height: 1.8;
 }
 
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.trend-log-grid {
+  grid-template-columns: 1fr 1fr;
+}
+
+.overview-panel :deep(.el-card__body) {
+  display: grid;
+  gap: 14px;
+}
+
+.breakdown-list,
+.pending-list {
+  display: grid;
+  gap: 14px;
+}
+
+.breakdown-item,
+.pending-item {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.breakdown-head,
+.pending-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.breakdown-label,
+.pending-title {
+  font-weight: 700;
+  color: #f5f9ff;
+}
+
+.breakdown-meta,
+.pending-desc {
+  font-size: 12px;
+  color: rgba(229, 238, 252, 0.62);
+}
+
+.breakdown-ratio {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.pending-item.urgent {
+  border-color: rgba(245, 108, 108, 0.28);
+}
+
+.pending-item.warning {
+  border-color: rgba(230, 162, 60, 0.28);
+}
+
+.pending-item.info {
+  border-color: rgba(103, 194, 58, 0.22);
+}
+
+.shortcut-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.trend-chart {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+  min-height: 180px;
+}
+
+.trend-col {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+
+.trend-bar-wrap {
+  width: 100%;
+  max-width: 34px;
+  height: 120px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+}
+
+.trend-bar {
+  width: 100%;
+  background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+  border-radius: 10px;
+  min-height: 4px;
+}
+
+.trend-value {
+  font-size: 12px;
+  color: #f5f9ff;
+}
+
+.trend-label {
+  font-size: 11px;
+  color: rgba(229, 238, 252, 0.62);
+}
+
+.trend-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(229, 238, 252, 0.7);
+}
+
+.log-list {
+  display: grid;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.log-item {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.log-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.log-time {
+  font-size: 12px;
+  color: rgba(229, 238, 252, 0.58);
+}
+
+.log-detail {
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(229, 238, 252, 0.85);
+}
+
 .data-table {
   --el-table-border-color: rgba(255, 255, 255, 0.08);
   --el-table-border: 1px solid rgba(255, 255, 255, 0.08);
@@ -1138,6 +1508,14 @@ onMounted(async () => {
 @media (max-width: 1200px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .trend-log-grid {
+    grid-template-columns: 1fr;
   }
 }
 
