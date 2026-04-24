@@ -37,6 +37,10 @@
             <el-icon><ChatDotSquare /></el-icon>
             <span>密码申诉</span>
           </el-menu-item>
+          <el-menu-item index="publish">
+            <el-icon><EditPen /></el-icon>
+            <span>内容发布</span>
+          </el-menu-item>
         </el-menu>
 
         <div class="aside-footer">
@@ -178,7 +182,7 @@
             </el-card>
           </section>
 
-          <section v-else class="table-section">
+          <section v-else-if="activeSection === 'resetRequests'" class="table-section">
             <el-card class="panel-card" shadow="never">
               <template #header>
                 <div class="panel-header">
@@ -228,6 +232,114 @@
               </el-table>
             </el-card>
           </section>
+
+          <section v-else-if="activeSection === 'publish'" class="table-section">
+            <el-card class="panel-card" shadow="never">
+              <template #header>
+                <div class="panel-header">
+                  <span>管理员发布内容</span>
+                  <el-tag type="warning" effect="plain">免 Navicat 直发</el-tag>
+                </div>
+              </template>
+
+              <el-alert
+                title="发布后会立即在对应前台页面显示，请确认分类与链接无误"
+                type="info"
+                :closable="false"
+                show-icon
+                style="margin-bottom: 16px;"
+              />
+
+              <el-tabs v-model="publishTab" class="publish-tabs">
+                <el-tab-pane label="个人提升资源" name="resource">
+                  <el-form :model="resourceForm" label-position="top" class="publish-form-grid">
+                    <el-form-item label="资源标题">
+                      <el-input v-model="resourceForm.title" maxlength="100" show-word-limit placeholder="例如：Java面试高频题精讲" />
+                    </el-form-item>
+                    <el-form-item label="资源分类">
+                      <el-select v-model="resourceForm.type" placeholder="请选择分类">
+                        <el-option v-for="item in resourceTypeOptions" :key="item" :label="item" :value="item" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="资源链接" class="full-width">
+                      <el-input v-model="resourceForm.url" placeholder="https://..." />
+                    </el-form-item>
+                    <el-form-item label="资源简介" class="full-width">
+                      <el-input v-model="resourceForm.description" type="textarea" :rows="3" maxlength="255" show-word-limit />
+                    </el-form-item>
+                    <el-form-item label="文件格式（可选）">
+                      <el-input v-model="resourceForm.fileFormat" maxlength="20" placeholder="例如：PDF / 视频" />
+                    </el-form-item>
+                    <el-form-item label="文件大小（可选）">
+                      <el-input v-model="resourceForm.fileSize" maxlength="50" placeholder="例如：120MB" />
+                    </el-form-item>
+                    <el-form-item label="封面链接（可选）" class="full-width">
+                      <el-input v-model="resourceForm.cover" placeholder="https://..." />
+                    </el-form-item>
+                  </el-form>
+                  <div class="publish-actions">
+                    <el-button @click="resetResourceForm">重置</el-button>
+                    <el-button type="primary" :loading="publishLoading" @click="handlePublishResource">发布资源</el-button>
+                  </div>
+                </el-tab-pane>
+
+                <el-tab-pane label="升学考公资料" name="study">
+                  <el-form :model="studyForm" label-position="top" class="publish-form-grid">
+                    <el-form-item label="资料标题">
+                      <el-input v-model="studyForm.title" maxlength="100" show-word-limit placeholder="例如：2027考研英语真题精讲" />
+                    </el-form-item>
+                    <el-form-item label="资料分类">
+                      <el-select v-model="studyForm.category" placeholder="请选择分类">
+                        <el-option v-for="item in studyCategoryOptions" :key="item" :label="item" :value="item" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="文件类型">
+                      <el-input v-model="studyForm.fileType" maxlength="20" placeholder="例如：PDF / 视频" />
+                    </el-form-item>
+                    <el-form-item label="资料链接" class="full-width">
+                      <el-input v-model="studyForm.downloadUrl" placeholder="https://..." />
+                    </el-form-item>
+                    <el-form-item label="资料简介" class="full-width">
+                      <el-input v-model="studyForm.description" type="textarea" :rows="3" maxlength="255" show-word-limit />
+                    </el-form-item>
+                  </el-form>
+                  <div class="publish-actions">
+                    <el-button @click="resetStudyForm">重置</el-button>
+                    <el-button type="primary" :loading="publishLoading" @click="handlePublishStudy">发布资料</el-button>
+                  </div>
+                </el-tab-pane>
+
+                <el-tab-pane label="招聘与面经" name="career">
+                  <el-form :model="careerForm" label-position="top" class="publish-form-grid">
+                    <el-form-item label="公司 / 平台">
+                      <el-input v-model="careerForm.company" maxlength="100" show-word-limit placeholder="例如：腾讯" />
+                    </el-form-item>
+                    <el-form-item label="信息类型">
+                      <el-select v-model="careerForm.type" placeholder="请选择类型">
+                        <el-option v-for="item in careerTypeOptions" :key="item" :label="item" :value="item" />
+                      </el-select>
+                    </el-form-item>
+                    <el-form-item label="标题" class="full-width">
+                      <el-input v-model="careerForm.title" maxlength="100" show-word-limit placeholder="例如：2027届校招内推-后台开发" />
+                    </el-form-item>
+                    <el-form-item label="内容详情" class="full-width">
+                      <el-input v-model="careerForm.content" type="textarea" :rows="4" maxlength="5000" show-word-limit />
+                    </el-form-item>
+                    <el-form-item label="标签（可选）">
+                      <el-input v-model="careerForm.tags" maxlength="255" placeholder="例如：Java,后端,内推" />
+                    </el-form-item>
+                    <el-form-item label="联系方式（可选）">
+                      <el-input v-model="careerForm.contact" maxlength="100" placeholder="邮箱 / 链接 / 内推码" />
+                    </el-form-item>
+                  </el-form>
+                  <div class="publish-actions">
+                    <el-button @click="resetCareerForm">重置</el-button>
+                    <el-button type="primary" :loading="publishLoading" @click="handlePublishCareer">发布信息</el-button>
+                  </div>
+                </el-tab-pane>
+              </el-tabs>
+            </el-card>
+          </section>
         </el-main>
       </el-container>
     </el-container>
@@ -246,7 +358,13 @@ const loading = ref(false)
 const usersLoading = ref(false)
 const postsLoading = ref(false)
 const resetRequestsLoading = ref(false)
+const publishLoading = ref(false)
 const currentUser = ref(JSON.parse(localStorage.getItem('user') || 'null'))
+const publishTab = ref('resource')
+
+const resourceTypeOptions = ['编程开发', '创意设计', '办公效率']
+const studyCategoryOptions = ['考研资料', '考公资料', '四六级']
+const careerTypeOptions = ['校招内推', '实习机会', '面试经验']
 
 const stats = ref({
   totalUsers: 0,
@@ -276,12 +394,40 @@ const resetRequestFilters = reactive({
   status: ''
 })
 
+const resourceForm = reactive({
+  title: '',
+  description: '',
+  type: '编程开发',
+  url: '',
+  fileFormat: '',
+  fileSize: '',
+  cover: ''
+})
+
+const studyForm = reactive({
+  title: '',
+  description: '',
+  category: '考研资料',
+  fileType: 'PDF',
+  downloadUrl: ''
+})
+
+const careerForm = reactive({
+  company: '',
+  title: '',
+  type: '校招内推',
+  content: '',
+  tags: '',
+  contact: ''
+})
+
 const sectionTitle = computed(() => {
   const mapping = {
     overview: '数据看板',
     users: '用户管理',
     posts: '内容审核',
-    resetRequests: '密码申诉'
+    resetRequests: '密码申诉',
+    publish: '内容发布'
   }
   return mapping[activeSection.value] || '管理员后台'
 })
@@ -389,6 +535,123 @@ const handleAdminApiError = (error) => {
     return
   }
   ElMessage.error('管理员数据加载失败，请稍后重试')
+}
+
+const resetResourceForm = () => {
+  resourceForm.title = ''
+  resourceForm.description = ''
+  resourceForm.type = '编程开发'
+  resourceForm.url = ''
+  resourceForm.fileFormat = ''
+  resourceForm.fileSize = ''
+  resourceForm.cover = ''
+}
+
+const resetStudyForm = () => {
+  studyForm.title = ''
+  studyForm.description = ''
+  studyForm.category = '考研资料'
+  studyForm.fileType = 'PDF'
+  studyForm.downloadUrl = ''
+}
+
+const resetCareerForm = () => {
+  careerForm.company = ''
+  careerForm.title = ''
+  careerForm.type = '校招内推'
+  careerForm.content = ''
+  careerForm.tags = ''
+  careerForm.contact = ''
+}
+
+const handlePublishResource = async () => {
+  if (!resourceForm.title || !resourceForm.type || !resourceForm.url) {
+    ElMessage.warning('请填写资源标题、分类和链接')
+    return
+  }
+
+  publishLoading.value = true
+  try {
+    const res = await request.post('/api/admin/resources', {
+      title: resourceForm.title,
+      description: resourceForm.description,
+      type: resourceForm.type,
+      url: resourceForm.url,
+      fileFormat: resourceForm.fileFormat,
+      fileSize: resourceForm.fileSize,
+      cover: resourceForm.cover
+    })
+
+    if (res.data.code === 200) {
+      ElMessage.success('资源发布成功')
+      resetResourceForm()
+    } else {
+      ElMessage.error(res.data.message || '资源发布失败')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '资源发布失败')
+  } finally {
+    publishLoading.value = false
+  }
+}
+
+const handlePublishStudy = async () => {
+  if (!studyForm.title || !studyForm.category || !studyForm.downloadUrl) {
+    ElMessage.warning('请填写资料标题、分类和链接')
+    return
+  }
+
+  publishLoading.value = true
+  try {
+    const res = await request.post('/api/admin/study', {
+      title: studyForm.title,
+      description: studyForm.description,
+      category: studyForm.category,
+      fileType: studyForm.fileType,
+      download_url: studyForm.downloadUrl
+    })
+
+    if (res.data.code === 200) {
+      ElMessage.success('资料发布成功')
+      resetStudyForm()
+    } else {
+      ElMessage.error(res.data.message || '资料发布失败')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '资料发布失败')
+  } finally {
+    publishLoading.value = false
+  }
+}
+
+const handlePublishCareer = async () => {
+  if (!careerForm.company || !careerForm.title || !careerForm.type || !careerForm.content) {
+    ElMessage.warning('请填写公司、标题、分类和内容')
+    return
+  }
+
+  publishLoading.value = true
+  try {
+    const res = await request.post('/api/admin/careers', {
+      company: careerForm.company,
+      title: careerForm.title,
+      type: careerForm.type,
+      content: careerForm.content,
+      tags: careerForm.tags,
+      contact: careerForm.contact
+    })
+
+    if (res.data.code === 200) {
+      ElMessage.success('招聘信息发布成功')
+      resetCareerForm()
+    } else {
+      ElMessage.error(res.data.message || '招聘信息发布失败')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '招聘信息发布失败')
+  } finally {
+    publishLoading.value = false
+  }
 }
 
 const refreshAll = async () => {
@@ -767,6 +1030,27 @@ onMounted(async () => {
   word-break: break-word;
 }
 
+.publish-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.publish-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.publish-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
 :deep(.el-table),
 :deep(.el-table__inner-wrapper),
 :deep(.el-table__body-wrapper),
@@ -808,6 +1092,10 @@ onMounted(async () => {
   .topbar-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .publish-form-grid {
+    grid-template-columns: 1fr;
   }
 
   .search-input,
