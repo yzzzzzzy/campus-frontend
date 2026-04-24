@@ -32,6 +32,10 @@ const PASSWORD_RESET_REQUEST_STATUS = {
     PENDING: 'pending',
     PROCESSED: 'processed'
 };
+const ALLOWED_RESOURCE_TYPES = ['编程开发', '创意设计', '办公效率'];
+const ALLOWED_STUDY_CATEGORIES = ['考研资料', '考公资料', '四六级'];
+const ALLOWED_CAREER_TYPES = ['校招内推', '实习机会', '面试经验'];
+const tableColumnsCache = new Map();
 
 const sendApiError = (res, status = 500, message, extra = {}) => {
     return res.status(status).send({
@@ -66,6 +70,44 @@ const toPositiveInt = (value) => {
     return Number.isInteger(num) && num > 0 ? num : null;
 };
 const isHttpUrl = (value) => /^https?:\/\//i.test(value);
+
+const getTableColumns = async (tableName) => {
+    if (tableColumnsCache.has(tableName)) {
+        return tableColumnsCache.get(tableName);
+    }
+
+    const [rows] = await db.query(`SHOW COLUMNS FROM \`${tableName}\``);
+    const columns = new Set(rows.map(row => row.Field));
+    tableColumnsCache.set(tableName, columns);
+    return columns;
+};
+
+const insertWithExistingColumns = async (tableName, fieldMap, requiredKeys = []) => {
+    const columns = await getTableColumns(tableName);
+    const entries = Object.entries(fieldMap).filter(([key, value]) => value !== undefined && columns.has(key));
+    const existingKeys = new Set(entries.map(([key]) => key));
+
+    for (const key of requiredKeys) {
+        if (!existingKeys.has(key)) {
+            throw new Error(`required-column-missing:${tableName}.${key}`);
+        }
+    }
+
+    if (entries.length === 0) {
+        throw new Error(`no-valid-columns:${tableName}`);
+    }
+
+    const columnSql = entries.map(([key]) => `\`${key}\``).join(', ');
+    const placeholders = entries.map(() => '?').join(', ');
+    const values = entries.map(([, value]) => value);
+
+    const [result] = await db.query(
+        `INSERT INTO \`${tableName}\` (${columnSql}) VALUES (${placeholders})`,
+        values
+    );
+
+    return result;
+};
 
 
 app.use(cors());
@@ -674,6 +716,176 @@ app.get('/api/admin/posts', isAdmin, async (req, res) => {
         res.send({ code: 200, message: '获取成功', data: rows });
     } catch (error) {
         console.error('获取帖子列表失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员发布个人提升资源
+app.post('/api/admin/resources', isAdmin, async (req, res) => {
+    try {
+        const title = normalizeString(req.body.title);
+        const description = normalizeOptionalString(req.body.description);
+        const type = normalizeString(req.body.type);
+        const link = normalizeString(req.body.url || req.body.download_url);
+        const cover = normalizeOptionalString(req.body.cover);
+        const fileFormat = normalizeOptionalString(req.body.file_format || req.body.fileFormat);
+        const fileSize = normalizeOptionalString(req.body.file_size || req.body.fileSize);
+
+        if (!title || !type || !link) {
+            return res.send({ code: 400, message: '标题、分类和链接不能为空' });
+        }
+        if (!ALLOWED_RESOURCE_TYPES.includes(type)) {
+            return res.send({ code: 400, message: '资源分类不合法' });
+        }
+        if (title.length > 100) {
+            return res.send({ code: 400, message: '标题不能超过100个字符' });
+        }
+        if (description && description.length > 255) {
+            return res.send({ code: 400, message: '简介不能超过255个字符' });
+        }
+        if (!isHttpUrl(link) || link.length > 255) {
+            return res.send({ code: 400, message: '资源链接格式不正确或超长' });
+        }
+        if (cover && (!isHttpUrl(cover) || cover.length > 255)) {
+            return res.send({ code: 400, message: '封面链接格式不正确或超长' });
+        }
+        if (fileFormat && fileFormat.length > 20) {
+            return res.send({ code: 400, message: '文件格式不能超过20个字符' });
+        }
+        if (fileSize && fileSize.length > 50) {
+            return res.send({ code: 400, message: '文件大小不能超过50个字符' });
+        }
+
+        const tableColumns = await getTableColumns('resources');
+        if (!tableColumns.has('url') && !tableColumns.has('download_url')) {
+            return res.status(500).send({ code: 500, message: 'resources 表缺少链接字段，请检查数据库结构' });
+        }
+
+        const result = await insertWithExistingColumns(
+            'resources',
+            {
+                title,
+                description,
+                type,
+                url: link,
+                download_url: link,
+                cover,
+                file_format: fileFormat,
+                file_size: fileSize,
+                user_id: req.user.id
+            },
+            ['title', 'type']
+        );
+
+        res.send({ code: 200, message: '资源发布成功', data: { id: result.insertId } });
+    } catch (error) {
+        console.error('管理员发布资源失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员发布升学考公资料
+app.post('/api/admin/study', isAdmin, async (req, res) => {
+    try {
+        const title = normalizeString(req.body.title);
+        const description = normalizeOptionalString(req.body.description);
+        const category = normalizeString(req.body.category);
+        const fileType = normalizeString(req.body.file_type || req.body.fileType || 'PDF');
+        const link = normalizeString(req.body.download_url || req.body.url);
+
+        if (!title || !category || !link) {
+            return res.send({ code: 400, message: '标题、分类和资料链接不能为空' });
+        }
+        if (!ALLOWED_STUDY_CATEGORIES.includes(category)) {
+            return res.send({ code: 400, message: '资料分类不合法' });
+        }
+        if (title.length > 100) {
+            return res.send({ code: 400, message: '标题不能超过100个字符' });
+        }
+        if (description && description.length > 255) {
+            return res.send({ code: 400, message: '简介不能超过255个字符' });
+        }
+        if (fileType.length > 20) {
+            return res.send({ code: 400, message: '文件类型不能超过20个字符' });
+        }
+        if (!isHttpUrl(link) || link.length > 255) {
+            return res.send({ code: 400, message: '资料链接格式不正确或超长' });
+        }
+
+        const tableColumns = await getTableColumns('study_materials');
+        if (!tableColumns.has('download_url') && !tableColumns.has('url')) {
+            return res.status(500).send({ code: 500, message: 'study_materials 表缺少链接字段，请检查数据库结构' });
+        }
+
+        const result = await insertWithExistingColumns(
+            'study_materials',
+            {
+                title,
+                description,
+                category,
+                file_type: fileType,
+                download_url: link,
+                url: link,
+                user_id: req.user.id
+            },
+            ['title', 'category']
+        );
+
+        res.send({ code: 200, message: '资料发布成功', data: { id: result.insertId } });
+    } catch (error) {
+        console.error('管理员发布资料失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 管理员发布招聘信息/面经
+app.post('/api/admin/careers', isAdmin, async (req, res) => {
+    try {
+        const company = normalizeString(req.body.company);
+        const title = normalizeString(req.body.title);
+        const type = normalizeString(req.body.type);
+        const content = normalizeString(req.body.content);
+        const tags = normalizeOptionalString(req.body.tags);
+        const contact = normalizeOptionalString(req.body.contact);
+
+        if (!company || !title || !type || !content) {
+            return res.send({ code: 400, message: '公司、标题、分类和内容不能为空' });
+        }
+        if (!ALLOWED_CAREER_TYPES.includes(type)) {
+            return res.send({ code: 400, message: '招聘信息分类不合法' });
+        }
+        if (company.length > 100 || title.length > 100) {
+            return res.send({ code: 400, message: '公司名称和标题不能超过100个字符' });
+        }
+        if (content.length > 5000) {
+            return res.send({ code: 400, message: '内容不能超过5000个字符' });
+        }
+        if (tags && tags.length > 255) {
+            return res.send({ code: 400, message: '标签不能超过255个字符' });
+        }
+        if (contact && contact.length > 100) {
+            return res.send({ code: 400, message: '联系方式不能超过100个字符' });
+        }
+
+        const finalContact = type === '面试经验' ? (contact || '无需投递') : (contact || '请联系管理员获取投递方式');
+
+        const result = await insertWithExistingColumns(
+            'careers',
+            {
+                company,
+                title,
+                type,
+                content,
+                tags,
+                contact: finalContact,
+                user_id: req.user.id
+            },
+            ['company', 'title', 'type', 'content']
+        );
+
+        res.send({ code: 200, message: '招聘信息发布成功', data: { id: result.insertId } });
+    } catch (error) {
+        console.error('管理员发布招聘信息失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
