@@ -1,4 +1,4 @@
-name: Deploy Backend to Tencent Cloud
+name: Deploy Fullstack to Tencent Cloud
 
 on:
   push:
@@ -17,14 +17,30 @@ jobs:
         username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SERVER_SSH_KEY }}
         script: |
-          # 1. 直接进入你的后端运行目录
+          # ==============================
+          # 1. 拉取最新源码 (前后端一起拉)
+          # ==============================
           cd /var/www/campus-backend
-          
-          # 2. 强制拉取 GitHub 上的最新代码
           git fetch --all
           git reset --hard origin/main
           git pull
           
-          # 3. 安装依赖并重启后端
+          # ==============================
+          # 2. 部署后端
+          # ==============================
           npm install
           pm2 restart campus-api
+          
+          # ==============================
+          # 3. 部署前端 (新增的魔法环节！)
+          # ==============================
+          # 进入前端文件夹
+          cd campus-frontend
+          # 安装前端依赖 (只在有新包时耗时)
+          npm install
+          # 执行 Vite 打包
+          npm run build
+          # 把打包好的 dist 目录里的最新网页，直接覆盖到 Nginx 的地盘去！
+          cp -r dist/* /var/www/campus-frontend/
+          
+          echo "🚀 全栈自动化部署大功告成！"
