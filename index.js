@@ -86,6 +86,15 @@ const getTableColumns = async (tableName) => {
     return columns;
 };
 
+const ensurePostsAnonymousColumn = async () => {
+    const [rows] = await db.query("SHOW COLUMNS FROM `posts` LIKE 'is_anonymous'");
+    if (rows.length === 0) {
+        await db.query('ALTER TABLE posts ADD COLUMN is_anonymous TINYINT(1) NOT NULL DEFAULT 0 AFTER tags');
+        tableColumnsCache.delete('posts');
+        console.log('已自动补充 posts.is_anonymous 字段');
+    }
+};
+
 const insertWithExistingColumns = async (tableName, fieldMap, requiredKeys = []) => {
     const columns = await getTableColumns(tableName);
     const entries = Object.entries(fieldMap).filter(([key, value]) => value !== undefined && columns.has(key));
@@ -360,11 +369,12 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
         const userId = req.user.id;
 
         // 获取前端填写的发帖内容
-        const { title, content, category_id, tags } = req.body;
+        const { title, content, category_id, tags, is_anonymous } = req.body;
         const normalizedTitle = normalizeString(title);
         const normalizedContent = normalizeString(content);
         const normalizedCategoryId = toPositiveInt(category_id);
         const normalizedTags = normalizeOptionalString(tags);
+        const normalizedAnonymous = normalizeStatus(is_anonymous) === 1 ? 1 : 0;
 
         // 简单的防呆校验，标题和内容不能为空
         if (!normalizedTitle || !normalizedContent || !normalizedCategoryId) {
@@ -378,9 +388,17 @@ app.post('/api/posts', authenticateToken, async (req, res) => {
         }
 
         // 插入到 posts 数据库表中
-        const [result] = await db.query(
-            'INSERT INTO posts (title, content, user_id, category_id, tags) VALUES (?, ?, ?, ?, ?)',
-            [normalizedTitle, normalizedContent, userId, normalizedCategoryId, normalizedTags]
+        const result = await insertWithExistingColumns(
+            'posts',
+            {
+                title: normalizedTitle,
+                content: normalizedContent,
+                user_id: userId,
+                category_id: normalizedCategoryId,
+                tags: normalizedTags,
+                is_anonymous: normalizedAnonymous
+            },
+            ['title', 'content', 'user_id', 'category_id']
         );
 
         res.send({
@@ -399,6 +417,8 @@ app.get('/api/posts', async (req, res) => {
     try {
         const keyword = req.query.keyword || '';
         const categoryId = req.query.categoryId || '';
+        const postColumns = await getTableColumns('posts');
+        const hasAnonymousColumn = postColumns.has('is_anonymous');
 
         // 👉 [新增] 接收分页参数，默认第1页，每页10条
         const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -434,12 +454,16 @@ app.get('/api/posts', async (req, res) => {
         `;
         // 注意：LIMIT 和 OFFSET 的参数必须放在数组的最后面
         const [rows] = await db.query(dataQuery, [...queryParams, limit, offset]);
+        const normalizedRows = rows.map((row) => ({
+            ...row,
+            author_name: hasAnonymousColumn && Number(row.is_anonymous) === 1 ? '匿名用户' : row.author_name
+        }));
 
         // 👉 把 total/page/limit 一起返回给前端，统一分页响应格式
         res.send({
             code: 200,
             message: '获取成功',
-            data: rows,
+            data: normalizedRows,
             total,
             page,
             limit
@@ -1166,10 +1190,12 @@ app.post('/api/admin/careers', isAdmin, async (req, res) => {
 app.get('/api/user/posts', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
+        const postColumns = await getTableColumns('posts');
+        const hasAnonymousColumn = postColumns.has('is_anonymous');
 
         // 1. 查论坛帖子 (标记 item_type 为 'post')
         const [posts] = await db.query(`
-            SELECT p.id, p.title, p.content, p.created_at, c.name AS category_name, 'post' AS item_type
+            SELECT p.id, p.title, p.content, p.created_at, c.name AS category_name, 'post' AS item_type${hasAnonymousColumn ? ', p.is_anonymous' : ''}
             FROM posts p LEFT JOIN categories c ON p.category_id = c.id WHERE p.user_id = ?
         `, [userId]);
 
@@ -1946,9 +1972,19 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`----------------------------------------`);
-    console.log(`🚀 后端服务已启动!`);
-    console.log(`👉 请在浏览器访问: http://localhost:${PORT}`);
-    console.log(`----------------------------------------`);
-});
+const startServer = async () => {
+    try {
+        await ensurePostsAnonymousColumn();
+    } catch (error) {
+        console.warn('自动检查 posts.is_anonymous 失败，继续启动服务:', error.message);
+    }
+
+    app.listen(PORT, () => {
+        console.log(`----------------------------------------`);
+        console.log(`🚀 后端服务已启动!`);
+        console.log(`👉 请在浏览器访问: http://localhost:${PORT}`);
+        console.log(`----------------------------------------`);
+    });
+};
+
+startServer();

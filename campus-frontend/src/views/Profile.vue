@@ -42,7 +42,7 @@
                       <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
                         <h4 style="margin: 0;">{{ post.title }}</h4>
                         <el-tag :type="post.item_type === 'post' ? '' : (post.item_type === 'career' ? 'warning' : 'success')" size="small">
-                          {{ post.item_type === 'post' ? '论坛帖子' : (post.item_type === 'career' ? '实习面经' : '竞赛招募') }}
+                          {{ post.item_type === 'post' ? (post.is_anonymous ? '匿名帖子' : '论坛帖子') : (post.item_type === 'career' ? '实习面经' : '竞赛招募') }}
                         </el-tag>
                         <el-tag type="info" effect="plain" size="small">{{ post.category_name }}</el-tag>
                       </div>

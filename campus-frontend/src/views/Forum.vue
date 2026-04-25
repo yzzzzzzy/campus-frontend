@@ -29,7 +29,7 @@
           </template>
           <p class="post-text">{{ post.content }}</p>
           <div class="post-footer">
-            <span>作者: {{ post.author_name }} | 标签: {{ post.tags || '无' }}</span>
+            <span>作者: {{ post.is_anonymous ? '匿名用户' : post.author_name }} | 标签: {{ post.tags || '无' }}</span>
             <div class="footer-actions">
               <span class="time-text">发布时间: {{ new Date(post.created_at).toLocaleString() }}</span>
               
@@ -111,6 +111,14 @@
             <el-form-item label="正文内容" required>
               <el-input v-model="postForm.content" type="textarea" :rows="5" placeholder="请详细描述你的需求或分享的内容..." />
             </el-form-item>
+            <el-form-item label="发帖方式">
+              <el-switch
+                v-model="postForm.is_anonymous"
+                active-text="匿名发布"
+                inactive-text="公开发布"
+              />
+              <div class="anonymous-tip">匿名后公开列表将显示为“匿名用户”，但后台仍可用于审核管理。</div>
+            </el-form-item>
           </el-form>
           <template #footer>
             <span class="dialog-footer">
@@ -138,7 +146,7 @@ const categoryList = ref([])
 const dialogVisible = ref(false)
 const searchQuery = ref('')
 const selectedCategory = ref('')
-const postForm = ref({ title: '', category_id: '', tags: '', content: '' })
+const postForm = ref({ title: '', category_id: '', tags: '', content: '', is_anonymous: false })
 const myFavoriteIds = ref([]) // 用来存当前用户收藏过的帖子 ID
 // 👉 [新增] 分页相关状态
 const currentPage = ref(1)   // 当前页码
@@ -234,7 +242,7 @@ const submitPost = async () => {
     if (res.data.code === 200) {
       ElMessage.success('发布成功！')
       dialogVisible.value = false
-      postForm.value = { title: '', category_id: '', tags: '', content: '' }
+      postForm.value = { title: '', category_id: '', tags: '', content: '', is_anonymous: false }
       fetchPosts() 
     }
   } catch (error) { ElMessage.error('发布失败') }
@@ -378,6 +386,13 @@ onUnmounted(() => {
 .comment-user { font-weight: bold; color: #409EFF; }
 .comment-content { color: #303133; }
 .comment-time { font-size: 11px; color: #c0c4cc; margin-left: 10px; }
+
+.anonymous-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
 
 @media (max-width: 768px) {
   .main-content {
