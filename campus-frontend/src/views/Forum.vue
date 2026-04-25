@@ -378,4 +378,43 @@ onUnmounted(() => {
 .comment-user { font-weight: bold; color: #409EFF; }
 .comment-content { color: #303133; }
 .comment-time { font-size: 11px; color: #c0c4cc; margin-left: 10px; }
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .toolbar,
+  .filter-group {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .search-input,
+  .filter-select {
+    width: 100%;
+  }
+
+  .card-header,
+  .post-footer,
+  .footer-actions,
+  .comment-input-box {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .comment-input-box :deep(.el-input) {
+    width: 100% !important;
+  }
+
+  .comment-time {
+    margin-left: 0;
+  }
+
+  :deep(.el-dialog) {
+    width: min(92vw, 760px) !important;
+  }
+}
 </style>

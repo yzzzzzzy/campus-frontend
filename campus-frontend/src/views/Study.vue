@@ -251,4 +251,33 @@ onUnmounted(() => {
 .material-action {
   margin-left: 20px;
 }
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .material-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 0;
+  }
+
+  .title-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .material-action {
+    margin-left: 0;
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  :deep(.el-dialog) {
+    width: min(92vw, 720px) !important;
+  }
+}
 </style>

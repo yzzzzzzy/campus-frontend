@@ -4,8 +4,14 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
+  width: 100%;
+  overflow-x: hidden;
   background-color: #f5f7fa;
   /* 设置一个温柔的高级灰背景色 */
+}
+
+* {
+  box-sizing: border-box;
 }
 
 /* 👉 [新增] 强制所有页面的大容器采用垂直排列 (上下结构) */
@@ -100,4 +106,43 @@ body,
   /* 与上方列表的间距 */
   padding-bottom: 20px;
   /* 底部留白 */
+}
+
+@media (max-width: 768px) {
+
+  .unified-tabs-shell,
+  .filter-container {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    margin-bottom: 16px;
+    padding: 12px;
+  }
+
+  .unified-tabs .el-tabs__item {
+    height: 42px;
+    font-size: 13px;
+    padding: 0 10px;
+  }
+
+  .filter-container .el-input,
+  .filter-container .el-select,
+  .filter-container .el-button {
+    width: 100% !important;
+  }
+
+  .pagination-container {
+    justify-content: flex-start;
+    overflow-x: auto;
+    margin-top: 16px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .pagination-container .el-pagination {
+    min-width: max-content;
+  }
+
+  .common-layout .main-content {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom)) !important;
+  }
 }
