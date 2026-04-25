@@ -17,6 +17,8 @@ jobs:
         username: ${{ secrets.SERVER_USERNAME }}
         key: ${{ secrets.SERVER_SSH_KEY }}
         script: |
+          # 开启严格模式：任何命令失败立即退出！
+          set -e
           # ==============================
           # 1. 拉取最新源码 (前后端一起拉)
           # ==============================
