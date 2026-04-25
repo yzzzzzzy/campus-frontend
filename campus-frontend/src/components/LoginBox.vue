@@ -275,7 +275,7 @@ onUnmounted(() => {
 .login-page {
   position: relative;
   width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
   /* 👉 背景改为浅蓝色渐变，更有呼吸感 */
   background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
   overflow: hidden;
@@ -294,7 +294,7 @@ onUnmounted(() => {
 .login-card {
   position: relative;
   z-index: 10;
-  width: 400px;
+  width: min(92vw, 400px);
   background: rgba(255, 255, 255, 0.6); /* 白色半透明背景 */
   backdrop-filter: blur(20px); /* 磨砂玻璃效果增强 */
   border: 1px solid rgba(255, 255, 255, 0.4);
@@ -398,5 +398,42 @@ onUnmounted(() => {
 :deep(.el-tabs__item) {
   font-weight: 500;
   color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+  .login-page {
+    height: auto;
+    padding: 18px 14px 14px;
+    overflow: auto;
+    align-items: flex-start;
+  }
+
+  .login-card {
+    border-radius: 18px;
+    padding: 8px;
+  }
+
+  .title {
+    font-size: 22px;
+    letter-spacing: 1px;
+  }
+
+  .verify-row {
+    flex-direction: column;
+  }
+
+  .verify-row :deep(.el-button) {
+    width: 100%;
+  }
+
+  .footer-note {
+    position: static;
+    margin-top: 14px;
+    text-align: center;
+  }
+
+  :deep(.el-dialog) {
+    width: min(92vw, 420px) !important;
+  }
 }
 </style>

@@ -377,4 +377,37 @@ onUnmounted(() => {
   color: #C0C4CC;
 }
 
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .card-wrapper {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .card-left {
+    padding-right: 0;
+  }
+
+  .card-right {
+    min-width: 0;
+    width: 100%;
+    align-items: flex-start;
+    border-left: none;
+    border-top: 1px dashed #ebeef5;
+    padding-left: 0;
+    padding-top: 12px;
+  }
+
+  .job-header {
+    flex-wrap: wrap;
+  }
+
+  :deep(.el-dialog) {
+    width: min(92vw, 520px) !important;
+  }
+}
+
 </style>

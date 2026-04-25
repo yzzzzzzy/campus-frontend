@@ -1617,6 +1617,34 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
+.publish-tabs :deep(.el-tabs__nav-wrap::after) {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.publish-tabs :deep(.el-tabs__item) {
+  height: 42px;
+  padding: 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba(229, 238, 252, 0.76);
+  transition: color 0.2s ease;
+}
+
+.publish-tabs :deep(.el-tabs__item:hover) {
+  color: #dcecff;
+}
+
+.publish-tabs :deep(.el-tabs__item.is-active) {
+  color: #f8fbff;
+}
+
+.publish-tabs :deep(.el-tabs__active-bar) {
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #6eb5ff 0%, #8ec8ff 100%);
+}
+
 .publish-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1684,6 +1712,10 @@ onMounted(async () => {
   .admin-main {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  .admin-main {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
   }
 
   .stats-grid {

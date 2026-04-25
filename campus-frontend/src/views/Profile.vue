@@ -1,11 +1,13 @@
 <template>
   <div class="common-layout">
     <el-container>
-      <NavBar title="👤 个人中心" bgColor="#909399" :showDropdown="false" />
+      <NavBar title="👤 个人中心" bgColor="#909399" :showDropdown="false">
+        <el-button @click="router.push('/home')" icon="Back">返回主页</el-button>
+      </NavBar>
 
       <el-main class="main-content">
         <el-row :gutter="20">
-          <el-col :span="6">
+          <el-col :xs="24" :sm="24" :md="6">
             <el-card shadow="hover" class="profile-card">
               <div class="avatar-container">
                 <el-avatar :size="120" :src="userInfo.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'" />
@@ -28,7 +30,7 @@
             </el-card>
           </el-col>
 
-          <el-col :span="18">
+          <el-col :xs="24" :sm="24" :md="18">
             <el-card shadow="hover" class="content-card">
               <el-tabs v-model="activeTab" class="profile-tabs">
                 
@@ -544,6 +546,41 @@ onUnmounted(() => {
   color: #8c939d; 
   /* 同样，让加号图标也不要挡着点击事件 */
   pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .profile-card,
+  .content-card {
+    margin-bottom: 12px;
+  }
+
+  .content-card {
+    min-height: auto;
+  }
+
+  .profile-tabs {
+    padding: 0;
+  }
+
+  .settings-form {
+    max-width: 100%;
+    padding: 12px 0;
+  }
+
+  .post-content {
+    white-space: normal;
+  }
+
+  :deep(.el-radio-group) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
 }
 
 </style>

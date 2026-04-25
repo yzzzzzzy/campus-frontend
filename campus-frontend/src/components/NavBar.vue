@@ -145,4 +145,32 @@ onUnmounted(() => {
   font-weight: bold;
   color: #303133;
 }
+
+@media (max-width: 768px) {
+  .header {
+    height: 56px;
+    padding: 0 12px;
+  }
+
+  .logo-title {
+    max-width: 52vw;
+    font-size: 16px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-right {
+    gap: 8px;
+  }
+
+  .custom-dropdown {
+    width: 170px;
+  }
+
+  :deep(.avatar-wrapper .el-avatar) {
+    width: 34px;
+    height: 34px;
+  }
+}
 </style>

@@ -299,4 +299,44 @@ const handleMouseLeave = (e) => {
   font-size: 14px;
   margin-top: 8px;
 }
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .hero-banner {
+    border-radius: 16px;
+    padding: 34px 14px;
+    margin-bottom: 24px;
+  }
+
+  .banner-title {
+    font-size: 26px;
+    letter-spacing: 1px;
+  }
+
+  .banner-subtitle {
+    font-size: 15px;
+    margin-bottom: 18px;
+  }
+
+  .explore-btn,
+  .admin-entry-btn {
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .section-header {
+    margin-top: 24px;
+  }
+
+  .section-header h2 {
+    font-size: 20px;
+  }
+
+  .nav-card h3 {
+    font-size: 18px;
+  }
+}
 </style>

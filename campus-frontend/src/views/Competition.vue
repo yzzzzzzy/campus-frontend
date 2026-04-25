@@ -16,7 +16,7 @@
         </div>
 
         <el-row :gutter="20">
-          <el-col :span="12" v-for="item in compList" :key="item.id" class="comp-col">
+          <el-col :xs="24" :sm="12" :md="12" v-for="item in compList" :key="item.id" class="comp-col">
             <el-card shadow="hover" class="comp-card" :class="{ 'is-full': item.status === '已满员' }">
               <template #header>
                 <div class="card-header">
@@ -337,5 +337,30 @@ onUnmounted(() => {
 .time-text {
   font-size: 12px;
   color: #909399;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .card-header,
+  .title-area,
+  .comp-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  :deep(.el-dialog) {
+    width: min(92vw, 760px) !important;
+  }
 }
 </style>

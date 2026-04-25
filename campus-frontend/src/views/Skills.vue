@@ -29,7 +29,7 @@
         </div>
 
         <el-row :gutter="20">
-          <el-col :span="8" v-for="item in resourceList" :key="item.id" class="resource-col">
+          <el-col :xs="24" :sm="12" :md="8" v-for="item in resourceList" :key="item.id" class="resource-col">
             <el-card shadow="hover" class="resource-card">
               <template #header>
                 <div class="card-header">
@@ -256,5 +256,20 @@ onUnmounted(() => {
 .time-text {
   font-size: 12px;
   color: #909399;
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    padding: 14px 12px;
+  }
+
+  .card-header {
+    flex-wrap: wrap;
+  }
+
+  .resource-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
 }
 </style>
