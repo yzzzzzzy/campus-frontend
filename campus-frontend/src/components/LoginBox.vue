@@ -403,7 +403,7 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .login-page {
     height: auto;
-    padding: 18px 14px 14px;
+    padding: 18px 14px 72px;
     overflow: auto;
     align-items: flex-start;
   }
@@ -427,8 +427,12 @@ onUnmounted(() => {
   }
 
   .footer-note {
-    position: static;
-    margin-top: 14px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: calc(100% - 24px);
+    margin-top: 0;
     text-align: center;
   }
 
