@@ -38,6 +38,27 @@ const ALLOWED_RESOURCE_TYPES = ['编程开发', '创意设计', '办公效率'];
 const ALLOWED_STUDY_CATEGORIES = ['考研资料', '考公资料', '四六级'];
 const ALLOWED_CAREER_TYPES = ['校招内推', '实习机会', '面试经验'];
 const ALLOWED_UPLOAD_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const ALLOWED_ADMIN_UPLOAD_MIME_TYPES = [
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'application/pdf',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/zip',
+    'application/x-zip-compressed',
+    'application/vnd.rar',
+    'application/x-rar-compressed',
+    'application/x-7z-compressed',
+    'application/octet-stream'
+];
+const ALLOWED_ADMIN_UPLOAD_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.rar', '.7z'];
 const tableColumnsCache = new Map();
 
 const sendApiError = (res, status = 500, message, extra = {}) => {
@@ -1888,6 +1909,26 @@ const upload = multer({
     limits: { fileSize: 2 * 1024 * 1024 }, // 限制 2MB
 });
 
+const adminUpload = multer({
+    storage: storage,
+    fileFilter: (req, file, cb) => {
+        if (!file) {
+            return cb(new Error('请选择要上传的文件'));
+        }
+
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        const mimeAllowed = ALLOWED_ADMIN_UPLOAD_MIME_TYPES.includes(file.mimetype);
+        const extAllowed = ALLOWED_ADMIN_UPLOAD_EXTENSIONS.includes(ext);
+
+        if (!mimeAllowed && !extAllowed) {
+            return cb(new Error('仅支持上传图片、PDF、Office文档、TXT或ZIP/RAR/7Z压缩包'));
+        }
+
+        return cb(null, true);
+    },
+    limits: { fileSize: 50 * 1024 * 1024 }, // 限制 50MB
+});
+
 // 2. 创建上传接口
 app.post('/api/upload', authenticateToken, (req, res) => {
     upload.single('file')(req, res, (error) => {
@@ -1905,6 +1946,34 @@ app.post('/api/upload', authenticateToken, (req, res) => {
         // 优先使用环境变量中的公网地址，未配置时自动使用当前请求域名
         const imgUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
         return res.send({ code: 200, message: '上传成功', url: imgUrl });
+    });
+});
+
+// 👉 [新增] 管理员发布内容通用文件上传接口（支持文档/压缩包）
+app.post('/api/admin/upload-file', isAdmin, (req, res) => {
+    adminUpload.single('file')(req, res, (error) => {
+        if (error) {
+            if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+                return res.send({ code: 400, message: '文件大小不能超过 50MB' });
+            }
+            return res.send({ code: 400, message: error.message || '上传失败，请检查文件格式' });
+        }
+
+        if (!req.file) {
+            return res.send({ code: 400, message: '请选择要上传的文件' });
+        }
+
+        const fileUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
+        return res.send({
+            code: 200,
+            message: '文件上传成功',
+            url: fileUrl,
+            data: {
+                fileName: req.file.originalname,
+                mimeType: req.file.mimetype,
+                size: req.file.size
+            }
+        });
     });
 });
 // 👉 [新增] 账号注销接口 (使用数据库事务)
