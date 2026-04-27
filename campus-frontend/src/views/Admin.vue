@@ -382,6 +382,19 @@
                     <el-form-item label="资源链接" class="full-width">
                       <el-input v-model="resourceForm.url" placeholder="https://..." />
                     </el-form-item>
+                    <el-form-item label="上传资源文件（可选）" class="full-width">
+                      <el-upload
+                        :action="adminUploadAction"
+                        :headers="uploadHeaders"
+                        :show-file-list="false"
+                        :before-upload="beforeResourceFileUpload"
+                        :on-success="handleResourceFileUploadSuccess"
+                        :on-error="handleResourceFileUploadError"
+                      >
+                        <el-button type="primary" plain :loading="resourceFileUploading">上传文件并自动填入链接</el-button>
+                      </el-upload>
+                      <div class="upload-tip">支持图片、PDF、Office、TXT、ZIP/RAR/7Z，单文件不超过 50MB</div>
+                    </el-form-item>
                     <el-form-item label="资源简介" class="full-width">
                       <el-input v-model="resourceForm.description" type="textarea" :rows="3" maxlength="255" show-word-limit />
                     </el-form-item>
@@ -416,6 +429,19 @@
                     </el-form-item>
                     <el-form-item label="资料链接" class="full-width">
                       <el-input v-model="studyForm.downloadUrl" placeholder="https://..." />
+                    </el-form-item>
+                    <el-form-item label="上传资料文件（可选）" class="full-width">
+                      <el-upload
+                        :action="adminUploadAction"
+                        :headers="uploadHeaders"
+                        :show-file-list="false"
+                        :before-upload="beforeStudyFileUpload"
+                        :on-success="handleStudyFileUploadSuccess"
+                        :on-error="handleStudyFileUploadError"
+                      >
+                        <el-button type="primary" plain :loading="studyFileUploading">上传文件并自动填入链接</el-button>
+                      </el-upload>
+                      <div class="upload-tip">上传成功后会自动填入资料链接与文件类型</div>
                     </el-form-item>
                     <el-form-item label="资料简介" class="full-width">
                       <el-input v-model="studyForm.description" type="textarea" :rows="3" maxlength="255" show-word-limit />
@@ -522,7 +548,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import request from '../utils/request'
+import request, { API_BASE_URL } from '../utils/request'
 
 const router = useRouter()
 const activeSection = ref('overview')
@@ -531,10 +557,13 @@ const usersLoading = ref(false)
 const postsLoading = ref(false)
 const resetRequestsLoading = ref(false)
 const publishLoading = ref(false)
+const resourceFileUploading = ref(false)
+const studyFileUploading = ref(false)
 const createAdminDialogVisible = ref(false)
 const createAdminLoading = ref(false)
 const currentUser = ref(JSON.parse(localStorage.getItem('user') || 'null'))
 const publishTab = ref('resource')
+const adminUploadAction = `${API_BASE_URL}/api/admin/upload-file`
 
 const resourceTypeOptions = ['编程开发', '创意设计', '办公效率']
 const studyCategoryOptions = ['考研资料', '考公资料', '四六级']
@@ -620,6 +649,10 @@ const createAdminForm = reactive({
   currentAdminPassword: '',
   confirmText: ''
 })
+
+const uploadHeaders = computed(() => ({
+  Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+}))
 
 const sectionTitle = computed(() => {
   const mapping = {
@@ -972,6 +1005,90 @@ const resetCareerForm = () => {
   careerForm.content = ''
   careerForm.tags = ''
   careerForm.contact = ''
+}
+
+const ensureAdminFileSizeValid = (file) => {
+  if (!file) {
+    ElMessage.error('请选择要上传的文件')
+    return false
+  }
+
+  if (file.size > 50 * 1024 * 1024) {
+    ElMessage.error('文件大小不能超过 50MB')
+    return false
+  }
+
+  return true
+}
+
+const beforeResourceFileUpload = (file) => {
+  const pass = ensureAdminFileSizeValid(file)
+  resourceFileUploading.value = pass
+  return pass
+}
+
+const beforeStudyFileUpload = (file) => {
+  const pass = ensureAdminFileSizeValid(file)
+  studyFileUploading.value = pass
+  return pass
+}
+
+const extractFileExtUpper = (filename) => {
+  const name = String(filename || '')
+  const index = name.lastIndexOf('.')
+  if (index < 0 || index === name.length - 1) return ''
+  return name.slice(index + 1).toUpperCase()
+}
+
+const toFileSizeLabel = (size) => {
+  const bytes = Number(size || 0)
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)}MB`
+  return `${Math.max(1, Math.round(bytes / 1024))}KB`
+}
+
+const handleResourceFileUploadSuccess = (response, uploadFile) => {
+  resourceFileUploading.value = false
+  if (response?.code !== 200 || !response?.url) {
+    ElMessage.error(response?.message || '资源文件上传失败')
+    return
+  }
+
+  resourceForm.url = response.url
+  if (!resourceForm.fileFormat) {
+    resourceForm.fileFormat = extractFileExtUpper(uploadFile?.name || response?.data?.fileName)
+  }
+  if (!resourceForm.fileSize) {
+    resourceForm.fileSize = toFileSizeLabel(response?.data?.size || uploadFile?.size)
+  }
+
+  ElMessage.success('文件上传成功，已自动填入资源链接')
+}
+
+const handleResourceFileUploadError = (error) => {
+  resourceFileUploading.value = false
+  ElMessage.error(error?.message || '资源文件上传失败')
+}
+
+const handleStudyFileUploadSuccess = (response, uploadFile) => {
+  studyFileUploading.value = false
+  if (response?.code !== 200 || !response?.url) {
+    ElMessage.error(response?.message || '资料文件上传失败')
+    return
+  }
+
+  studyForm.downloadUrl = response.url
+  const ext = extractFileExtUpper(uploadFile?.name || response?.data?.fileName)
+  if (ext) {
+    studyForm.fileType = ext
+  }
+
+  ElMessage.success('文件上传成功，已自动填入资料链接')
+}
+
+const handleStudyFileUploadError = (error) => {
+  studyFileUploading.value = false
+  ElMessage.error(error?.message || '资料文件上传失败')
 }
 
 const handlePublishResource = async () => {
@@ -1660,6 +1777,13 @@ onMounted(async () => {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 8px;
+}
+
+.upload-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(229, 238, 252, 0.68);
+  line-height: 1.5;
 }
 
 :deep(.el-table),
