@@ -19,13 +19,15 @@ jobs:
         script: |
           # 开启严格模式：任何命令失败立即退出！
           set -e
+          # 避免部分服务器上的 GnuTLS / HTTP2 连接异常
+          git config --global http.version HTTP/1.1
           # ==============================
           # 1. 拉取最新源码 (前后端一起拉)
           # ==============================
           cd /var/www/campus-backend
-          git fetch --all
+          git fetch origin main
           git reset --hard origin/main
-          git pull
+          git clean -fd
           
           # ==============================
           # 2. 部署后端
