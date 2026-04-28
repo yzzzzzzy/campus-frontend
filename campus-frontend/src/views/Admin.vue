@@ -17,8 +17,8 @@
           :default-active="activeSection"
           class="admin-menu"
           background-color="transparent"
-          text-color="rgba(255,255,255,0.72)"
-          active-text-color="#ffffff"
+          text-color="#475569"
+          active-text-color="#2563eb"
           @select="activeSection = $event"
         >
           <el-menu-item index="overview">
@@ -1307,10 +1307,10 @@ onMounted(async () => {
   min-height: 100vh;
   overflow: hidden;
   background:
-    radial-gradient(circle at top left, rgba(255, 196, 87, 0.18), transparent 34%),
-    radial-gradient(circle at right 20%, rgba(59, 130, 246, 0.18), transparent 28%),
-    linear-gradient(135deg, #09111f 0%, #0d1728 45%, #111b2e 100%);
-  color: #e5eefc;
+    radial-gradient(circle at top left, rgba(191, 219, 254, 0.55), transparent 30%),
+    radial-gradient(circle at right 20%, rgba(219, 234, 254, 0.55), transparent 26%),
+    linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+  color: #1f2937;
 }
 
 .ambient {
@@ -1323,17 +1323,17 @@ onMounted(async () => {
 .ambient-one {
   width: 280px;
   height: 280px;
-  background: rgba(56, 189, 248, 0.18);
-  top: -100px;
-  right: 5%;
+  background: rgba(191, 219, 254, 0.45);
+  top: -120px;
+  right: 2%;
 }
 
 .ambient-two {
   width: 320px;
   height: 320px;
-  background: rgba(251, 191, 36, 0.14);
-  bottom: -120px;
-  left: -80px;
+  background: rgba(226, 232, 240, 0.65);
+  bottom: -140px;
+  left: -100px;
 }
 
 .admin-shell {
@@ -1353,9 +1353,9 @@ onMounted(async () => {
   flex-direction: column;
   justify-content: space-between;
   padding: 28px 18px 22px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(4, 10, 20, 0.55);
-  backdrop-filter: blur(18px);
+  border-right: 1px solid rgba(226, 232, 240, 0.9);
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(14px);
 }
 
 .brand-block {
@@ -1374,9 +1374,9 @@ onMounted(async () => {
   justify-content: center;
   font-size: 20px;
   font-weight: 800;
-  color: #09111f;
-  background: linear-gradient(135deg, #fbbf24, #fde68a);
-  box-shadow: 0 12px 30px rgba(251, 191, 36, 0.3);
+  color: #ffffff;
+  background: linear-gradient(135deg, #2563eb, #60a5fa);
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.22);
 }
 
 .brand-title {
@@ -1388,7 +1388,7 @@ onMounted(async () => {
 .brand-subtitle {
   margin-top: 4px;
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.55);
+  color: #64748b;
 }
 
 .admin-menu {
@@ -1403,8 +1403,8 @@ onMounted(async () => {
 }
 
 .admin-menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.35), rgba(59, 130, 246, 0.15));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(96, 165, 250, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
 }
 
 .aside-footer {
@@ -1416,19 +1416,20 @@ onMounted(async () => {
 .assistant-card {
   padding: 16px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.95));
+  border: 1px solid rgba(226, 232, 240, 0.95);
 }
 
 .assistant-label {
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.55);
+  color: #64748b;
 }
 
 .assistant-name {
   margin: 8px 0 12px;
   font-size: 16px;
   font-weight: 700;
+  color: #0f172a;
 }
 
 .home-btn {
@@ -1448,14 +1449,14 @@ onMounted(async () => {
   align-items: center;
   height: auto;
   padding: 28px 34px 0;
-  color: #f5f9ff;
+  color: #0f172a;
 }
 
 .page-kicker {
   font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: rgba(229, 238, 252, 0.45);
+  color: #94a3b8;
 }
 
 .page-title {
@@ -1483,11 +1484,11 @@ onMounted(async () => {
 
 .stat-card,
 .panel-card {
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  background: rgba(11, 18, 33, 0.72) !important;
-  backdrop-filter: blur(16px);
-  color: #f2f7ff;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(226, 232, 240, 1) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(12px);
+  color: #0f172a;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
   border-radius: 22px;
 }
 
@@ -1497,7 +1498,7 @@ onMounted(async () => {
 
 .stat-label {
   font-size: 13px;
-  color: rgba(229, 238, 252, 0.64);
+  color: #64748b;
 }
 
 .stat-value {
@@ -1510,11 +1511,11 @@ onMounted(async () => {
 .stat-hint {
   margin-top: 8px;
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.48);
+  color: #94a3b8;
 }
 
 .panel-card :deep(.el-card__header) {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(226, 232, 240, 1);
 }
 
 .panel-header {
@@ -1539,7 +1540,7 @@ onMounted(async () => {
 }
 
 .overview-note {
-  color: rgba(229, 238, 252, 0.72);
+  color: #475569;
   line-height: 1.8;
 }
 
@@ -1569,8 +1570,8 @@ onMounted(async () => {
 .pending-item {
   padding: 14px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #f8fbff;
+  border: 1px solid #e2e8f0;
 }
 
 .breakdown-head,
@@ -1585,13 +1586,13 @@ onMounted(async () => {
 .breakdown-label,
 .pending-title {
   font-weight: 700;
-  color: #f5f9ff;
+  color: #0f172a;
 }
 
 .breakdown-meta,
 .pending-desc {
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.62);
+  color: #64748b;
 }
 
 .breakdown-ratio {
@@ -1600,15 +1601,15 @@ onMounted(async () => {
 }
 
 .pending-item.urgent {
-  border-color: rgba(245, 108, 108, 0.28);
+  border-color: rgba(239, 68, 68, 0.22);
 }
 
 .pending-item.warning {
-  border-color: rgba(230, 162, 60, 0.28);
+  border-color: rgba(245, 158, 11, 0.22);
 }
 
 .pending-item.info {
-  border-color: rgba(103, 194, 58, 0.22);
+  border-color: rgba(59, 130, 246, 0.16);
 }
 
 .shortcut-actions {
@@ -1637,7 +1638,7 @@ onMounted(async () => {
   max-width: 34px;
   height: 120px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.06);
+  background: #eef4ff;
   display: flex;
   align-items: flex-end;
   overflow: hidden;
@@ -1652,12 +1653,12 @@ onMounted(async () => {
 
 .trend-value {
   font-size: 12px;
-  color: #f5f9ff;
+  color: #0f172a;
 }
 
 .trend-label {
   font-size: 11px;
-  color: rgba(229, 238, 252, 0.62);
+  color: #64748b;
 }
 
 .trend-legend {
@@ -1665,7 +1666,7 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.7);
+  color: #475569;
 }
 
 .log-list {
@@ -1679,8 +1680,8 @@ onMounted(async () => {
 .log-item {
   padding: 12px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #e2e8f0;
+  background: #f8fbff;
 }
 
 .log-head {
@@ -1693,23 +1694,23 @@ onMounted(async () => {
 
 .log-time {
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.58);
+  color: #64748b;
 }
 
 .log-detail {
   font-size: 13px;
   line-height: 1.5;
-  color: rgba(229, 238, 252, 0.85);
+  color: #0f172a;
 }
 
 .data-table {
-  --el-table-border-color: rgba(255, 255, 255, 0.08);
-  --el-table-border: 1px solid rgba(255, 255, 255, 0.08);
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.04);
+  --el-table-border-color: #e2e8f0;
+  --el-table-border: 1px solid #e2e8f0;
+  --el-table-header-bg-color: #f8fafc;
   --el-table-tr-bg-color: transparent;
-  --el-table-row-hover-bg-color: rgba(59, 130, 246, 0.08);
-  --el-table-text-color: #edf4ff;
-  --el-table-header-text-color: rgba(229, 238, 252, 0.75);
+  --el-table-row-hover-bg-color: rgba(59, 130, 246, 0.05);
+  --el-table-text-color: #0f172a;
+  --el-table-header-text-color: #475569;
 }
 
 .user-actions {
@@ -1735,7 +1736,7 @@ onMounted(async () => {
 }
 
 .publish-tabs :deep(.el-tabs__nav-wrap::after) {
-  background-color: rgba(255, 255, 255, 0.12);
+  background-color: #e2e8f0;
 }
 
 .publish-tabs :deep(.el-tabs__item) {
@@ -1744,16 +1745,16 @@ onMounted(async () => {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: rgba(229, 238, 252, 0.76);
+  color: #64748b;
   transition: color 0.2s ease;
 }
 
 .publish-tabs :deep(.el-tabs__item:hover) {
-  color: #dcecff;
+  color: #2563eb;
 }
 
 .publish-tabs :deep(.el-tabs__item.is-active) {
-  color: #f8fbff;
+  color: #2563eb;
 }
 
 .publish-tabs :deep(.el-tabs__active-bar) {
@@ -1782,7 +1783,7 @@ onMounted(async () => {
 .upload-tip {
   margin-top: 6px;
   font-size: 12px;
-  color: rgba(229, 238, 252, 0.68);
+  color: #64748b;
   line-height: 1.5;
 }
 
