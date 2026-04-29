@@ -35,22 +35,46 @@
               <el-tabs v-model="activeTab" class="profile-tabs">
                 
                 <el-tab-pane label="📝 我的发布" name="posts">
-                  <el-empty v-if="myPosts.length === 0" description="你还没有发布过帖子哦~" />
+                  <div style="margin-bottom: 20px; text-align: center;">
+                    <el-radio-group v-model="postTypeFilter">
+                      <el-radio-button value="all">全部</el-radio-button>
+                      <el-radio-button value="post">论坛帖子</el-radio-button>
+                      <el-radio-button value="career">实习就业</el-radio-button>
+                      <el-radio-button value="competition">竞赛招募</el-radio-button>
+                    </el-radio-group>
+                  </div>
+
+                  <el-empty v-if="filteredMyPosts.length === 0" description="你在这个分类下还没有发布内容哦~" />
                   
-                  <div v-for="post in myPosts" :key="post.item_type + post.id" class="my-post-item">
+                  <div v-for="post in filteredMyPosts" :key="post.item_type + post.id" class="my-post-item">
                     <div class="post-header">
-                      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                        <h4 style="margin: 0;">{{ post.title }}</h4>
-                        <el-tag :type="post.item_type === 'post' ? '' : (post.item_type === 'career' ? 'warning' : 'success')" size="small">
-                          {{ post.item_type === 'post' ? (post.is_anonymous ? '匿名帖子' : '论坛帖子') : (post.item_type === 'career' ? '实习面经' : '竞赛招募') }}
-                        </el-tag>
-                        <el-tag type="info" effect="plain" size="small">{{ post.category_name }}</el-tag>
+                      <div class="post-title-row">
+                        <h4>{{ post.title }}</h4>
+                        <div class="post-tags">
+                          <el-tag :type="getMyPostTypeTag(post.item_type)" size="small">
+                            {{ getMyPostTypeLabel(post) }}
+                          </el-tag>
+                          <el-tag type="info" effect="plain" size="small">{{ post.category_name }}</el-tag>
+                          <el-tag v-if="post.item_type === 'competition'" :type="post.status === '招募中' ? 'success' : 'info'" effect="plain" size="small">
+                            {{ post.status || '招募中' }}
+                          </el-tag>
+                        </div>
                       </div>
                     </div>
                     <p class="post-content">{{ post.content }}</p>
                     
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                    <div class="post-actions-row">
                       <span class="post-time">发布于: {{ new Date(post.created_at).toLocaleString() }}</span>
+                      
+                      <div v-if="post.item_type === 'competition'" class="competition-status-editor">
+                        <el-select v-model="post.statusDraft" size="small" class="status-select">
+                          <el-option label="招募中" value="招募中" />
+                          <el-option label="已满员" value="已满员" />
+                        </el-select>
+                        <el-button type="primary" plain size="small" :disabled="post.statusDraft === post.status" @click="handleUpdateCompetitionStatus(post)">
+                          保存状态
+                        </el-button>
+                      </div>
                       
                       <el-button type="danger" link icon="Delete" @click="handleDeletePost(post)">
                         删除
@@ -86,6 +110,10 @@
                       </el-button>
                     </div>
                   </div>
+                </el-tab-pane>
+
+                <el-tab-pane label="✉ 私信" name="messages">
+                  <Messages />
                 </el-tab-pane>
 
                 <el-tab-pane label="⚙️ 个人设置" name="settings">
@@ -149,9 +177,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import request, { API_BASE_URL } from '../utils/request'
 import NavBar from '../components/NavBar.vue' // 👉 引入通用导航栏组件
+import Messages from './Messages.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -161,10 +190,39 @@ const userInfo = ref({})
 const myPosts = ref([])
 const myFavorites = ref([]) // 👉 [新增] 我的收藏列表
 const favoriteType = ref('post') // 👉 [新增] 收藏类型
+const postTypeFilter = ref('all')
 const activeTab = ref('posts')
 const userStats = ref({ totalLikes: 0 }) // 👉 [新增] 存放统计数据
 const uploadAction = `${API_BASE_URL}/api/upload`
 const isPageActive = ref(true)
+
+const filteredMyPosts = computed(() => {
+  if (postTypeFilter.value === 'all') {
+    return myPosts.value
+  }
+  return myPosts.value.filter(post => post.item_type === postTypeFilter.value)
+})
+
+const getMyPostTypeTag = (itemType) => {
+  const map = {
+    post: 'primary',
+    career: 'warning',
+    competition: 'success'
+  }
+  return map[itemType] || 'info'
+}
+
+const getMyPostTypeLabel = (post) => {
+  if (post.item_type === 'post') {
+    return post.is_anonymous ? '匿名帖子' : '论坛帖子'
+  }
+  if (post.item_type === 'career') {
+    return post.category_name || '实习就业'
+  }
+  return '竞赛招募'
+}
+
+const getCompetitionStatusTag = (status) => (status === '已满员' ? 'info' : 'success')
 
 // 👉 [新增] 拉取获赞统计
 const fetchUserStats = async () => {
@@ -232,7 +290,10 @@ const fetchMyPosts = async () => {
     const res = await request.get('/api/user/posts')
     if (!isPageActive.value) return
     if (res.data.code === 200) {
-      myPosts.value = res.data.data
+      myPosts.value = res.data.data.map(item => ({
+        ...item,
+        statusDraft: item.item_type === 'competition' ? (item.status || '招募中') : undefined
+      }))
     }
   } catch (error) {
     ElMessage.error('获取帖子失败')
@@ -329,6 +390,29 @@ const handleUnfavorite = async (itemId) => {
   } catch (error) { ElMessage.error('操作失败') }
 }
 // 👉 [智能升级版] 安全删除我的发布（支持多种类型）
+const handleUpdateCompetitionStatus = async (post) => {
+  if (post.item_type !== 'competition') return
+  if (!post.statusDraft || post.statusDraft === post.status) {
+    ElMessage.info('状态没有变化')
+    return
+  }
+
+  try {
+    const res = await request.put(`/api/competitions/${post.id}/status`, {
+      status: post.statusDraft
+    })
+
+    if (res.data.code === 200) {
+      post.status = post.statusDraft
+      ElMessage.success('竞赛状态已更新')
+    } else {
+      ElMessage.error(res.data.message)
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '更新状态失败')
+  }
+}
+
 const handleDeletePost = async (post) => {
   try {
     await ElMessageBox.confirm('确定要永久删除这条发布吗？相关的评论和收藏也会被一并清空哦！', '⚠️ 删除确认', {
@@ -427,10 +511,12 @@ onMounted(() => {
   fetchMyPosts()
   fetchMyFavorites()
   fetchUserStats()
-  
-  // 👉 [新增] 检查是不是从导航栏的“我的收藏”点进来的
-  if (route.query.tab === 'favorites') {
-    activeTab.value = 'favorites' // 直接激活收藏标签页！
+  activeTab.value = route.query.tab === 'messages' ? 'messages' : (route.query.tab === 'favorites' ? 'favorites' : 'posts')
+})
+
+watch(() => route.query.tab, (tab) => {
+  if (tab === 'messages' || tab === 'favorites' || tab === 'posts' || tab === 'settings') {
+    activeTab.value = tab
   }
 })
 
@@ -496,8 +582,39 @@ onUnmounted(() => {
   border-bottom: 1px solid #ebeef5;
   padding: 15px 0;
 }
-.post-header h4 { margin: 0 0 10px 0; }
+.post-header h4 { margin: 0; }
+.post-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.post-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .post-content { font-size: 14px; color: #606266; margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.post-actions-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.competition-status-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.status-select {
+  width: 110px;
+}
 .post-time { font-size: 12px; color: #909399; }
 /* 修改头像上传框的样式，解决点击不跟手的问题 */
 .avatar-uploader {

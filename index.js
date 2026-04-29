@@ -116,6 +116,156 @@ const ensurePostsAnonymousColumn = async () => {
     }
 };
 
+// 👉 [新增] 确保私信相关表存在（启动时自动建表）
+const ensureMessagesTables = async () => {
+    // conversations, conversation_members, messages
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            is_group TINYINT DEFAULT 0,
+            user_low_id INT DEFAULT NULL,
+            user_high_id INT DEFAULT NULL,
+            last_message_at DATETIME DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    const [conversationColumns] = await db.query('SHOW COLUMNS FROM conversations LIKE ?', ['user_low_id']);
+    if (conversationColumns.length === 0) {
+        await db.query('ALTER TABLE conversations ADD COLUMN user_low_id INT DEFAULT NULL AFTER is_group');
+    }
+
+    const [conversationHighColumns] = await db.query('SHOW COLUMNS FROM conversations LIKE ?', ['user_high_id']);
+    if (conversationHighColumns.length === 0) {
+        await db.query('ALTER TABLE conversations ADD COLUMN user_high_id INT DEFAULT NULL AFTER user_low_id');
+    }
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS conversation_members (
+            conversation_id INT NOT NULL,
+            user_id INT NOT NULL,
+            PRIMARY KEY (conversation_id, user_id),
+            INDEX idx_conv_user (conversation_id, user_id),
+            CONSTRAINT fk_conv_members_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS messages (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            conversation_id INT NOT NULL,
+            from_user_id INT NOT NULL,
+            to_user_id INT DEFAULT NULL,
+            content TEXT,
+            is_read TINYINT DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_conv_created (conversation_id, created_at),
+            CONSTRAINT fk_messages_conv FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    await db.query(`
+        UPDATE conversations c
+        JOIN (
+            SELECT conversation_id, MIN(user_id) AS low_id, MAX(user_id) AS high_id
+            FROM conversation_members
+            GROUP BY conversation_id
+            HAVING COUNT(*) = 2
+        ) m ON m.conversation_id = c.id
+        SET c.user_low_id = m.low_id, c.user_high_id = m.high_id
+        WHERE c.is_group = 0
+    `);
+
+    // 如果同一对用户已经存在多条私信会话，先合并到最早的一条，再加唯一约束。
+    const [duplicatePairs] = await db.query(`
+        SELECT user_low_id, user_high_id, MIN(id) AS canonical_id, COUNT(*) AS cnt
+        FROM conversations
+        WHERE is_group = 0 AND user_low_id IS NOT NULL AND user_high_id IS NOT NULL
+        GROUP BY user_low_id, user_high_id
+        HAVING COUNT(*) > 1
+        ORDER BY canonical_id ASC
+    `);
+
+    if (duplicatePairs.length > 0) {
+        const connection = await db.getConnection();
+        try {
+            await connection.beginTransaction();
+
+            for (const pair of duplicatePairs) {
+                const { user_low_id: lowId, user_high_id: highId, canonical_id: canonicalId } = pair;
+                const [duplicateRows] = await connection.query(
+                    `SELECT id FROM conversations
+                     WHERE is_group = 0 AND user_low_id = ? AND user_high_id = ?
+                     ORDER BY id ASC`,
+                    [lowId, highId]
+                );
+
+                const duplicateIds = duplicateRows.map(row => row.id).filter(id => id !== canonicalId);
+                if (duplicateIds.length === 0) {
+                    continue;
+                }
+
+                for (const duplicateId of duplicateIds) {
+                    await connection.query(
+                        'INSERT IGNORE INTO conversation_members (conversation_id, user_id) SELECT ?, user_id FROM conversation_members WHERE conversation_id = ?',
+                        [canonicalId, duplicateId]
+                    );
+                    await connection.query('UPDATE messages SET conversation_id = ? WHERE conversation_id = ?', [canonicalId, duplicateId]);
+                    await connection.query('DELETE FROM conversation_members WHERE conversation_id = ?', [duplicateId]);
+                    await connection.query('DELETE FROM conversations WHERE id = ?', [duplicateId]);
+                }
+            }
+
+            await connection.commit();
+        } catch (error) {
+            await connection.rollback();
+            throw error;
+        } finally {
+            connection.release();
+        }
+    }
+
+    const [uniquePairIndexRows] = await db.query("SHOW INDEX FROM conversations WHERE Key_name = 'uq_conversation_pair'");
+    if (uniquePairIndexRows.length === 0) {
+        await db.query('ALTER TABLE conversations ADD UNIQUE INDEX uq_conversation_pair (user_low_id, user_high_id)');
+    }
+
+    console.log('已确保私信表结构存在');
+};
+
+const getPrivateConversationPair = (userA, userB) => {
+    const lowId = Math.min(userA, userB);
+    const highId = Math.max(userA, userB);
+    return { lowId, highId };
+};
+
+const findPrivateConversationId = async (userA, userB) => {
+    const { lowId, highId } = getPrivateConversationPair(userA, userB);
+    const [rows] = await db.query(
+        `SELECT id
+         FROM conversations
+         WHERE is_group = 0 AND user_low_id = ? AND user_high_id = ?
+         ORDER BY id ASC
+         LIMIT 1`,
+        [lowId, highId]
+    );
+    return rows[0]?.id || null;
+};
+
+const createPrivateConversation = async (fromUserId, toUserId) => {
+    const { lowId, highId } = getPrivateConversationPair(fromUserId, toUserId);
+    const [insertRes] = await db.query(
+        'INSERT INTO conversations (is_group, user_low_id, user_high_id, last_message_at) VALUES (?, ?, ?, ?)',
+        [0, lowId, highId, null]
+    );
+    const convId = insertRes.insertId;
+    await db.query(
+        'INSERT INTO conversation_members (conversation_id, user_id) VALUES (?, ?), (?, ?)',
+        [convId, fromUserId, convId, toUserId]
+    );
+    return convId;
+};
+
 const insertWithExistingColumns = async (tableName, fieldMap, requiredKeys = []) => {
     const columns = await getTableColumns(tableName);
     const entries = Object.entries(fieldMap).filter(([key, value]) => value !== undefined && columns.has(key));
@@ -512,6 +662,213 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
+
+// ================= 私信相关 API =================
+
+// 获取会话列表
+app.get('/api/messages/conversations', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // 查询该用户所属的会话列表
+        const [convRows] = await db.query(
+            `SELECT c.id, c.is_group, c.last_message_at
+             FROM conversations c
+             JOIN conversation_members cm ON cm.conversation_id = c.id
+             WHERE cm.user_id = ?
+             ORDER BY c.last_message_at DESC`,
+            [userId]
+        );
+
+        const conversations = [];
+        for (const c of convRows) {
+            // 最近一条消息预览
+            const [[lastMsgRows]] = await db.query(
+                `SELECT id, content, from_user_id, to_user_id, created_at
+                 FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1`,
+                [c.id]
+            );
+
+            const [unreadRows] = await db.query(
+                `SELECT COUNT(*) AS cnt FROM messages WHERE conversation_id = ? AND is_read = 0 AND to_user_id = ?`,
+                [c.id, userId]
+            );
+
+            // 查找会话的另一个成员（用于单聊显示对方信息）
+            const [memberRows] = await db.query(
+                `SELECT u.id, u.nickname, u.avatar FROM conversation_members cm JOIN users u ON cm.user_id = u.id WHERE cm.conversation_id = ? AND u.id <> ? LIMIT 1`,
+                [c.id, userId]
+            );
+
+            conversations.push({
+                id: c.id,
+                is_group: Number(c.is_group || 0),
+                last_message_at: lastMsgRows ? lastMsgRows.created_at : c.last_message_at,
+                last_message_preview: lastMsgRows ? (String(lastMsgRows.content).slice(0, 120)) : '',
+                unread_count: Number(unreadRows[0]?.cnt || 0),
+                peer: memberRows[0] || null,
+                avatar: (memberRows[0] && memberRows[0].avatar) || null,
+                peer_name: (memberRows[0] && memberRows[0].nickname) || '群聊'
+            });
+        }
+
+        res.send({ code: 200, message: '获取会话列表成功', data: conversations });
+    } catch (error) {
+        console.error('获取会话列表失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 获取会话消息（分页）
+app.get('/api/messages/:conversationId', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const convId = toPositiveInt(req.params.conversationId);
+        if (!convId) return res.send({ code: 400, message: 'conversationId 非法' });
+
+        // 验证用户是否是会话成员
+        const [memberCheck] = await db.query('SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ? LIMIT 1', [convId, userId]);
+        if (memberCheck.length === 0) return res.status(403).send({ code: 403, message: '无权查看该会话' });
+
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+        const offset = (page - 1) * limit;
+
+        const [rows] = await db.query(
+            `SELECT id, conversation_id, from_user_id, to_user_id, content, is_read, created_at
+             FROM messages
+             WHERE conversation_id = ?
+             ORDER BY created_at ASC
+             LIMIT ? OFFSET ?`,
+            [convId, limit, offset]
+        );
+
+        res.send({ code: 200, message: '获取消息成功', data: rows, page, limit });
+    } catch (error) {
+        console.error('获取会话消息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 发送消息（支持通过 conversation_id 或 to_user_id 创建/查找会话）
+app.post('/api/messages', authenticateToken, async (req, res) => {
+    try {
+        const fromUserId = req.user.id;
+        const { conversation_id, to_user_id, content } = req.body;
+        const normalizedContent = normalizeString(content || '');
+        if (!normalizedContent) return res.send({ code: 400, message: '消息内容不能为空' });
+
+        let convId = toPositiveInt(conversation_id);
+        let toUserId = toPositiveInt(to_user_id);
+
+        if (!convId && !toUserId) {
+            return res.send({ code: 400, message: '缺少 conversation_id 或 to_user_id' });
+        }
+
+        // 如果提供了 to_user_id，则查找是否已存在一对一会话
+        if (!convId && toUserId) {
+            // 不允许给自己发私信
+            if (toUserId === fromUserId) return res.send({ code: 400, message: '不能给自己发消息' });
+
+            convId = await findPrivateConversationId(fromUserId, toUserId);
+            if (!convId) {
+                convId = await createPrivateConversation(fromUserId, toUserId);
+            }
+        }
+
+        // 如果有 conversation_id，检查权限并决定 to_user_id（如果未提供）
+        if (convId) {
+            const [memberRows] = await db.query('SELECT user_id FROM conversation_members WHERE conversation_id = ?', [convId]);
+            const memberIds = memberRows.map(r => r.user_id);
+            if (!memberIds.includes(fromUserId)) return res.status(403).send({ code: 403, message: '无权在该会话发送消息' });
+            if (!toUserId) {
+                // 尝试取第一个不是自己的成员作为接收方（仅对一对一有效）
+                const other = memberIds.find(id => id !== fromUserId);
+                toUserId = other || null;
+            }
+        }
+
+        // 插入消息
+        const [insertMsgRes] = await db.query(
+            'INSERT INTO messages (conversation_id, from_user_id, to_user_id, content, is_read) VALUES (?, ?, ?, ?, ?)',
+            [convId, fromUserId, toUserId, normalizedContent, 0]
+        );
+
+        // 更新 conversations.last_message_at
+        await db.query('UPDATE conversations SET last_message_at = ? WHERE id = ?', [new Date(), convId]);
+
+        // 返回新消息（简单查询）
+        const [[newMsgRows]] = await db.query('SELECT id, conversation_id, from_user_id, to_user_id, content, is_read, created_at FROM messages WHERE id = ?', [insertMsgRes.insertId]);
+
+        res.send({ code: 200, message: '发送成功', data: newMsgRows });
+    } catch (error) {
+        console.error('发送消息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 创建或查找一对一会话（不发送消息）
+app.post('/api/conversations', authenticateToken, async (req, res) => {
+    try {
+        const fromUserId = req.user.id;
+        const toUserId = toPositiveInt(req.body.to_user_id);
+        if (!toUserId) return res.send({ code: 400, message: 'to_user_id 非法' });
+        if (toUserId === fromUserId) return res.send({ code: 400, message: '不能创建和自己的会话' });
+
+        let convId = await findPrivateConversationId(fromUserId, toUserId);
+        if (!convId) {
+            convId = await createPrivateConversation(fromUserId, toUserId);
+        }
+
+        // 返回会话基础信息
+        const [peerRows] = await db.query('SELECT id, nickname, avatar FROM users WHERE id = ? LIMIT 1', [toUserId]);
+        res.send({ code: 200, message: '会话已就绪', data: { conversation_id: convId, peer: peerRows[0] || null } });
+    } catch (error) {
+        console.error('创建会话失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 标记会话为已读（将所有 to_user_id 为当前用户的消息标记为已读）
+app.put('/api/conversations/:id/read', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const convId = toPositiveInt(req.params.id);
+        if (!convId) return res.send({ code: 400, message: 'conversationId 非法' });
+
+        const [memberCheck] = await db.query('SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ? LIMIT 1', [convId, userId]);
+        if (memberCheck.length === 0) return res.status(403).send({ code: 403, message: '无权操作该会话' });
+
+        await db.query('UPDATE messages SET is_read = 1 WHERE conversation_id = ? AND to_user_id = ? AND is_read = 0', [convId, userId]);
+
+        res.send({ code: 200, message: '已标记为已读' });
+    } catch (error) {
+        console.error('标记已读失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 删除会话（仅会话成员可删除，删除后级联清理消息）
+app.delete('/api/conversations/:id', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const convId = toPositiveInt(req.params.id);
+        if (!convId) return res.send({ code: 400, message: 'conversationId 非法' });
+
+        const [memberCheck] = await db.query('SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ? LIMIT 1', [convId, userId]);
+        if (memberCheck.length === 0) {
+            return res.status(403).send({ code: 403, message: '无权删除该会话' });
+        }
+
+        await db.query('DELETE FROM conversations WHERE id = ?', [convId]);
+        res.send({ code: 200, message: '会话已删除' });
+    } catch (error) {
+        console.error('删除会话失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// ================= 私信 API 结束 =================
 
 // 👉 [新增] 管理员数据面板统计
 app.get('/api/admin/stats', isAdmin, async (req, res) => {
@@ -1228,7 +1585,7 @@ app.get('/api/user/posts', authenticateToken, async (req, res) => {
 
         // 3. 查竞赛招募 (标记 item_type 为 'competition')
         const [comps] = await db.query(`
-            SELECT id, title, description AS content, created_at, comp_name AS category_name, 'competition' AS item_type
+            SELECT id, title, description AS content, created_at, comp_name AS category_name, status, 'competition' AS item_type
             FROM competitions WHERE user_id = ?
         `, [userId]);
 
@@ -1496,6 +1853,44 @@ app.delete('/api/competitions/:id', authenticateToken, async (req, res) => {
 
         res.send({ code: 200, message: '删除成功' });
     } catch (error) {
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 👉 [新增] 11-3-2. 修改自己发布的竞赛状态
+app.put('/api/competitions/:id/status', authenticateToken, async (req, res) => {
+    try {
+        const compId = toPositiveInt(req.params.id);
+        const userId = req.user.id;
+        const adminEditing = Number(req.user.role) === 1;
+        const nextStatus = normalizeString(req.body.status);
+        const allowedStatus = ['招募中', '已满员'];
+
+        if (!compId) {
+            return res.send({ code: 400, message: '记录ID格式不正确' });
+        }
+        if (!allowedStatus.includes(nextStatus)) {
+            return res.send({ code: 400, message: '状态值非法，仅支持: 招募中 / 已满员' });
+        }
+
+        const [comps] = await db.query('SELECT user_id, status FROM competitions WHERE id = ?', [compId]);
+        if (comps.length === 0) {
+            return res.send({ code: 404, message: '记录不存在' });
+        }
+
+        if (!adminEditing && comps[0].user_id !== userId) {
+            return res.send({ code: 403, message: '无权修改别人的招募状态' });
+        }
+
+        if (comps[0].status === nextStatus) {
+            return res.send({ code: 200, message: '状态没有变化', data: { id: compId, status: nextStatus } });
+        }
+
+        await db.query('UPDATE competitions SET status = ? WHERE id = ?', [nextStatus, compId]);
+
+        res.send({ code: 200, message: '竞赛状态已更新', data: { id: compId, status: nextStatus } });
+    } catch (error) {
+        console.error('修改竞赛状态失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
@@ -2044,6 +2439,7 @@ const PORT = process.env.PORT || 3000;
 const startServer = async () => {
     try {
         await ensurePostsAnonymousColumn();
+        await ensureMessagesTables();
     } catch (error) {
         console.warn('自动检查 posts.is_anonymous 失败，继续启动服务:', error.message);
     }

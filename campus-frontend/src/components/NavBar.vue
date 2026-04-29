@@ -19,6 +19,7 @@
               </el-tag>
             </div>
             <el-dropdown-item command="profile" icon="User">个人中心</el-dropdown-item>
+            <el-dropdown-item command="messages" icon="Message">私信</el-dropdown-item>
             <el-dropdown-item command="favorites" icon="Star">我的收藏</el-dropdown-item>
             <el-dropdown-item v-if="Number(userInfo.role) === 1" command="admin" icon="Setting">管理后台</el-dropdown-item>
             <el-dropdown-item divided command="logout" icon="SwitchButton" style="color: #F56C6C;">退出登录</el-dropdown-item>
@@ -73,6 +74,8 @@ const handleCommand = (command) => {
     // 👉 [修改] 去掉原来的 ElMessage，改成带参数跳转！
     // 告诉个人中心：我要去 profile 页面，并且我要直接看 favorites 标签页
     router.push({ path: '/profile', query: { tab: 'favorites' } })
+  } else if (command === 'messages') {
+    router.push({ path: '/profile', query: { tab: 'messages' } })
   } else if (command === 'admin') {
     router.push('/admin')
   }

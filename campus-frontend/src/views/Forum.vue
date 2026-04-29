@@ -57,6 +57,10 @@
                   style="font-size: 18px;" 
                 />
               </el-tooltip>
+              <el-button v-if="!post.is_anonymous" type="primary" link icon="ChatSquareDot" @click="messageAuthor(post)">
+                私信作者
+              </el-button>
+              <el-button v-else type="info" plain size="small" disabled>匿名用户不可私信</el-button>
               
               <el-button type="primary" link icon="ChatDotRound" @click="toggleComments(post)">
                 {{ post.showComments ? '收起评论' : '查看评论' }}
@@ -257,6 +261,22 @@ const toggleComments = async (post) => {
     } catch (error) { ElMessage.error('获取评论失败') }
   }
   post.showComments = !post.showComments
+}
+
+// 私信作者（若非匿名）：创建或查找会话并跳转到个人中心的私信标签
+const messageAuthor = async (post) => {
+  if (!post || post.is_anonymous) return ElMessage.warning('匿名帖子无法私信作者')
+  try {
+    const res = await request.post('/api/conversations', { to_user_id: post.user_id })
+    if (res.data.code === 200) {
+      const convId = res.data.data.conversation_id
+      router.push({ path: '/profile', query: { tab: 'messages', conv: convId } })
+    } else {
+      ElMessage.error(res.data.message || '无法创建会话')
+    }
+  } catch (error) {
+    ElMessage.error('操作失败，请检查登录状态')
+  }
 }
 
 const submitComment = async (post) => {
