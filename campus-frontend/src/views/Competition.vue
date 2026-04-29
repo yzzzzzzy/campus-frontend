@@ -8,9 +8,9 @@
       <el-main class="main-content">
         <div class="filter-bar">
           <el-radio-group v-model="activeStatus" @change="handleStatusChange">
-            <el-radio-button label="">全部组队</el-radio-button>
-            <el-radio-button label="招募中">🔥 招募中</el-radio-button>
-            <el-radio-button label="已满员">✅ 已满员</el-radio-button>
+            <el-radio-button value="">全部组队</el-radio-button>
+            <el-radio-button value="招募中">🔥 招募中</el-radio-button>
+            <el-radio-button value="已满员">✅ 已满员</el-radio-button>
           </el-radio-group>
           <el-button type="success" icon="Plus" @click="dialogVisible = true">发布招募</el-button>
         </div>
@@ -55,10 +55,16 @@
                     />
                   </el-tooltip>
 
-                  <el-popover v-if="item.status === '招募中'" placement="top" :width="200" trigger="click" :content="'联系方式: ' + item.contact_info">
+                  <el-popover v-if="item.status === '招募中'" placement="top" :width="260" trigger="click">
                     <template #reference>
                       <el-button type="success" plain size="small">联系队长</el-button>
                     </template>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                      <div>联系方式: <strong>{{ item.contact_info }}</strong></div>
+                      <div style="text-align:right">
+                        <el-button type="primary" size="small" @click="contactLeader(item)">发私信</el-button>
+                      </div>
+                    </div>
                   </el-popover>
                   <el-button v-else type="info" plain size="small" disabled>暂不缺人</el-button>
                 </div>
@@ -247,6 +253,22 @@ const handleFavorite = async (item) => {
       syncFavoriteIds(item.id, nextFavorited)
     }
   } catch (error) { ElMessage.error('操作失败') }
+}
+
+// 点击联系队长：弹出联系方式已由 popover 完成；此处实现发私信跳转逻辑
+const contactLeader = async (item) => {
+  if (!item || !item.user_id) return ElMessage.warning('缺少队长信息')
+  try {
+    const res = await request.post('/api/conversations', { to_user_id: item.user_id })
+    if (res.data.code === 200) {
+      const convId = res.data.data.conversation_id
+      router.push({ path: '/profile', query: { tab: 'messages', conv: convId } })
+    } else {
+      ElMessage.error(res.data.message || '无法创建会话')
+    }
+  } catch (error) {
+    ElMessage.error('请先登录后再私信队长')
+  }
 }
 
 onMounted(async () => {
