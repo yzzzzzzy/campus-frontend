@@ -43,6 +43,16 @@ const ADMIN_CREATE_CONFIRM_TEXT = 'CREATE_ADMIN';
 const ALLOWED_RESOURCE_TYPES = ['编程开发', '创意设计', '办公效率'];
 const ALLOWED_STUDY_CATEGORIES = ['考研资料', '考公资料', '四六级'];
 const ALLOWED_CAREER_TYPES = ['校招内推', '实习机会', '面试经验'];
+const ANNOUNCEMENT_SEED_ITEMS = [
+    {
+        title: '【平台公告】公告栏功能已上线',
+        content: '主页顶栏新增铃铛公告入口，后续平台重要通知、活动提醒和维护公告都会在这里统一发布。'
+    },
+    {
+        title: '【使用指南】公告发布入口已开放',
+        content: '管理员可在后台「内容发布」页面新增公告，建议将重要通知置顶，方便同学第一时间查看。'
+    }
+];
 const ALLOWED_UPLOAD_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const ALLOWED_ADMIN_UPLOAD_MIME_TYPES = [
     'image/jpeg',
@@ -271,6 +281,66 @@ const ensureMessagesTables = async () => {
     }
 
     console.log('已确保私信表结构存在');
+};
+
+const ensureAnnouncementTables = async () => {
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS announcements (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            title VARCHAR(100) NOT NULL,
+            content TEXT NOT NULL,
+            is_pinned TINYINT(1) NOT NULL DEFAULT 0,
+            created_by INT DEFAULT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_announcements_created_at (created_at),
+            INDEX idx_announcements_pinned_created (is_pinned, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    const announcementColumnChecks = [
+        ['is_pinned', 'ALTER TABLE announcements ADD COLUMN is_pinned TINYINT(1) NOT NULL DEFAULT 0 AFTER content'],
+        ['created_by', 'ALTER TABLE announcements ADD COLUMN created_by INT DEFAULT NULL AFTER is_pinned'],
+        ['updated_at', 'ALTER TABLE announcements ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at']
+    ];
+
+    for (const [columnName, alterSql] of announcementColumnChecks) {
+        const [columnRows] = await db.query('SHOW COLUMNS FROM announcements LIKE ?', [columnName]);
+        if (columnRows.length === 0) {
+            await db.query(alterSql);
+        }
+    }
+
+    const [announcementReadColumns] = await db.query('SHOW COLUMNS FROM users LIKE ?', ['last_announcement_read_at']);
+    if (announcementReadColumns.length === 0) {
+        await db.query('ALTER TABLE users ADD COLUMN last_announcement_read_at DATETIME DEFAULT NULL AFTER status');
+        tableColumnsCache.delete('users');
+    }
+
+    // 逐条已读记录表
+    await db.query(`
+        CREATE TABLE IF NOT EXISTS user_announcement_reads (
+            user_id INT NOT NULL,
+            announcement_id INT NOT NULL,
+            read_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, announcement_id),
+            INDEX idx_uar_announcement (announcement_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    const [announcementCountRows] = await db.query('SELECT COUNT(*) AS total FROM announcements');
+    if (Number(announcementCountRows[0]?.total || 0) === 0) {
+        for (const item of ANNOUNCEMENT_SEED_ITEMS) {
+            await db.query(
+                'INSERT INTO announcements (title, content, is_pinned, created_by) VALUES (?, ?, ?, ?)',
+                [item.title, item.content, 1, null]
+            );
+        }
+        console.log('已写入两条示例公告');
+    }
+
+    tableColumnsCache.delete('announcements');
+    console.log('已确保公告表结构存在');
 };
 
 const getPrivateConversationPair = (userA, userB) => {
@@ -699,7 +769,7 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
     try {
         // 从数据库查询当前用户的详细信息（密码除外）
         const [users] = await db.query(
-            'SELECT id, username, nickname, major, skills, avatar, created_at, role, status FROM users WHERE id = ?',
+            'SELECT id, username, nickname, major, skills, avatar, created_at, role, status, last_announcement_read_at FROM users WHERE id = ?',
             [req.user.id]
         );
 
@@ -709,6 +779,250 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
         res.send({ code: 200, message: '获取成功', data: users[0] });
     } catch (error) {
         console.error('获取用户信息失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// ================= 公告相关 API =================
+
+app.get('/api/announcements', authenticateToken, async (req, res) => {
+    try {
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+        const userId = req.user.id;
+
+        const [[userRows], [announcementRows], [readRows]] = await Promise.all([
+            db.query('SELECT last_announcement_read_at FROM users WHERE id = ? LIMIT 1', [userId]),
+            db.query(
+                `SELECT id, title, content, is_pinned, created_at, updated_at
+                 FROM announcements
+                 ORDER BY is_pinned DESC, created_at DESC
+                 LIMIT ?`,
+                [limit]
+            ),
+            db.query('SELECT announcement_id FROM user_announcement_reads WHERE user_id = ?', [userId])
+        ]);
+
+        const lastReadAt = userRows[0]?.last_announcement_read_at || null;
+        const lastReadTime = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+        const individuallyReadIds = new Set(readRows.map(r => r.announcement_id));
+
+        const data = announcementRows.map((item) => {
+            const createdTime = new Date(item.created_at).getTime();
+            const isNew = createdTime > lastReadTime && !individuallyReadIds.has(item.id);
+            return { ...item, is_new: isNew };
+        });
+
+        const unreadCount = data.filter(item => item.is_new).length;
+
+        res.send({
+            code: 200,
+            message: '获取公告成功',
+            data,
+            unreadCount
+        });
+    } catch (error) {
+        console.error('获取公告失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+app.get('/api/announcements/:id', authenticateToken, async (req, res) => {
+    try {
+        const announcementId = toPositiveInt(req.params.id);
+        if (!announcementId) {
+            return res.send({ code: 400, message: '公告ID格式不正确' });
+        }
+
+        const [rows] = await db.query(
+            `SELECT id, title, content, is_pinned, created_at, updated_at
+             FROM announcements
+             WHERE id = ?
+             LIMIT 1`,
+            [announcementId]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).send({ code: 404, message: '公告不存在' });
+        }
+
+        res.send({ code: 200, message: '获取公告详情成功', data: rows[0] });
+    } catch (error) {
+        console.error('获取公告详情失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+app.put('/api/announcements/read', authenticateToken, async (req, res) => {
+    try {
+        await db.query('UPDATE users SET last_announcement_read_at = NOW() WHERE id = ?', [req.user.id]);
+        // 全部已读时清空逐条记录（不再需要）
+        await db.query('DELETE FROM user_announcement_reads WHERE user_id = ?', [req.user.id]);
+        res.send({ code: 200, message: '全部公告已标记为已读' });
+    } catch (error) {
+        console.error('标记公告已读失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 单条公告已读
+app.put('/api/announcements/:id/read', authenticateToken, async (req, res) => {
+    try {
+        const announcementId = toPositiveInt(req.params.id);
+        if (!announcementId) {
+            return res.send({ code: 400, message: '公告ID格式不正确' });
+        }
+        // INSERT IGNORE 防止重复记录报错
+        await db.query(
+            'INSERT IGNORE INTO user_announcement_reads (user_id, announcement_id) VALUES (?, ?)',
+            [req.user.id, announcementId]
+        );
+        res.send({ code: 200, message: '已标记为已读' });
+    } catch (error) {
+        console.error('标记单条公告已读失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+app.post('/api/admin/announcements', isAdmin, async (req, res) => {
+    try {
+        const title = normalizeString(req.body.title);
+        const content = normalizeString(req.body.content);
+        const isPinned = normalizeStatus(req.body.is_pinned ?? req.body.isPinned) === 1 ? 1 : 0;
+
+        if (!title || !content) {
+            return res.send({ code: 400, message: '公告标题和内容不能为空' });
+        }
+        if (title.length > 100) {
+            return res.send({ code: 400, message: '公告标题不能超过100个字符' });
+        }
+        if (content.length > 2000) {
+            return res.send({ code: 400, message: '公告内容不能超过2000个字符' });
+        }
+
+        const result = await insertWithExistingColumns(
+            'announcements',
+            {
+                title,
+                content,
+                is_pinned: isPinned,
+                created_by: req.user.id
+            },
+            ['title', 'content']
+        );
+
+        res.send({ code: 200, message: '公告发布成功', data: { id: result.insertId } });
+    } catch (error) {
+        console.error('管理员发布公告失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 管理员获取全部公告列表
+app.get('/api/admin/announcements', isAdmin, async (req, res) => {
+    try {
+        const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+        const offset = (page - 1) * limit;
+
+        const [[countRows], [rows]] = await Promise.all([
+            db.query('SELECT COUNT(*) AS total FROM announcements'),
+            db.query(
+                'SELECT id, title, content, is_pinned, created_by, created_at, updated_at FROM announcements ORDER BY is_pinned DESC, created_at DESC LIMIT ? OFFSET ?',
+                [limit, offset]
+            )
+        ]);
+
+        res.send({
+            code: 200,
+            data: rows,
+            total: Number(countRows[0]?.total || 0),
+            page,
+            limit
+        });
+    } catch (error) {
+        console.error('获取公告列表失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 管理员编辑公告
+app.put('/api/admin/announcements/:id', isAdmin, async (req, res) => {
+    try {
+        const announcementId = toPositiveInt(req.params.id);
+        if (!announcementId) {
+            return res.send({ code: 400, message: '公告ID格式不正确' });
+        }
+
+        const title = normalizeString(req.body.title);
+        const content = normalizeString(req.body.content);
+        const isPinned = normalizeStatus(req.body.is_pinned ?? req.body.isPinned) === 1 ? 1 : 0;
+
+        if (!title || !content) {
+            return res.send({ code: 400, message: '公告标题和内容不能为空' });
+        }
+        if (title.length > 100) return res.send({ code: 400, message: '公告标题不能超过100个字符' });
+        if (content.length > 2000) return res.send({ code: 400, message: '公告内容不能超过2000个字符' });
+
+        const [existing] = await db.query('SELECT id FROM announcements WHERE id = ? LIMIT 1', [announcementId]);
+        if (existing.length === 0) {
+            return res.status(404).send({ code: 404, message: '公告不存在' });
+        }
+
+        await db.query(
+            'UPDATE announcements SET title = ?, content = ?, is_pinned = ? WHERE id = ?',
+            [title, content, isPinned, announcementId]
+        );
+
+        res.send({ code: 200, message: '公告更新成功' });
+    } catch (error) {
+        console.error('编辑公告失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 管理员删除公告
+app.delete('/api/admin/announcements/:id', isAdmin, async (req, res) => {
+    try {
+        const announcementId = toPositiveInt(req.params.id);
+        if (!announcementId) {
+            return res.send({ code: 400, message: '公告ID格式不正确' });
+        }
+
+        const [existing] = await db.query('SELECT id FROM announcements WHERE id = ? LIMIT 1', [announcementId]);
+        if (existing.length === 0) {
+            return res.status(404).send({ code: 404, message: '公告不存在' });
+        }
+
+        await db.query('DELETE FROM announcements WHERE id = ?', [announcementId]);
+        // 同时清理逐条已读记录
+        await db.query('DELETE FROM user_announcement_reads WHERE announcement_id = ?', [announcementId]);
+
+        res.send({ code: 200, message: '公告已删除' });
+    } catch (error) {
+        console.error('删除公告失败:', error);
+        res.status(500).send({ code: 500, message: '服务器内部错误' });
+    }
+});
+
+// 管理员切换公告置顶状态
+app.put('/api/admin/announcements/:id/pin', isAdmin, async (req, res) => {
+    try {
+        const announcementId = toPositiveInt(req.params.id);
+        if (!announcementId) {
+            return res.send({ code: 400, message: '公告ID格式不正确' });
+        }
+
+        const [existing] = await db.query('SELECT id, is_pinned FROM announcements WHERE id = ? LIMIT 1', [announcementId]);
+        if (existing.length === 0) {
+            return res.status(404).send({ code: 404, message: '公告不存在' });
+        }
+
+        const newPinned = existing[0].is_pinned ? 0 : 1;
+        await db.query('UPDATE announcements SET is_pinned = ? WHERE id = ?', [newPinned, announcementId]);
+
+        res.send({ code: 200, message: newPinned ? '已置顶' : '已取消置顶', data: { is_pinned: newPinned } });
+    } catch (error) {
+        console.error('切换置顶失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
     }
 });
@@ -2594,8 +2908,9 @@ const startServer = async () => {
     try {
         await ensurePostsAnonymousColumn();
         await ensureMessagesTables();
+        await ensureAnnouncementTables();
     } catch (error) {
-        console.warn('自动检查 posts.is_anonymous 失败，继续启动服务:', error.message);
+        console.warn('自动检查数据库表结构失败，继续启动服务:', error.message);
     }
 
     app.listen(PORT, () => {

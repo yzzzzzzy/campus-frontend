@@ -1,7 +1,12 @@
 <template>
   <div class="common-layout">
     <el-container>
-      <NavBar title="🎓 校园信息共享平台" bgColor="#409EFF" />
+      <NavBar 
+        ref="navBarRef"
+        title="🎓 校园信息共享平台" 
+        bgColor="#409EFF"
+        @show-announcement-detail="handleShowAnnouncementDetail"
+      />
 
       <el-main class="main-content">
         <div class="hero-banner">
@@ -98,21 +103,119 @@
 
       </el-main>
     </el-container>
+
+    <!-- 公告详情 Dialog - 使用 Teleport 挂载到 body，避免层级问题 -->
+    <teleport to="body">
+      <el-dialog
+        v-model="detailDialogVisible"
+        title="公告详情"
+        width="680px"
+        align-center
+        :close-on-click-modal="false"
+      >
+        <div v-if="detailLoading" class="detail-loading">
+          <el-skeleton :rows="5" animated />
+        </div>
+        <div v-else-if="currentAnnouncement?.id" class="announcement-detail-content">
+          <div class="detail-header">
+            <div class="detail-title">{{ currentAnnouncement.title }}</div>
+            <div class="detail-tags">
+              <el-tag v-if="currentAnnouncement.is_pinned" type="danger" effect="dark">置顶</el-tag>
+            </div>
+          </div>
+          <div class="detail-meta">
+            <span>发布时间：{{ formatDetailTime(currentAnnouncement.created_at) }}</span>
+            <span v-if="currentAnnouncement.updated_at && currentAnnouncement.updated_at !== currentAnnouncement.created_at">
+              最后更新：{{ formatDetailTime(currentAnnouncement.updated_at) }}
+            </span>
+          </div>
+          <div class="detail-body">{{ currentAnnouncement.content }}</div>
+        </div>
+        <el-empty v-else description="加载中或公告不存在..." :image-size="80" />
+
+        <template #footer>
+          <el-button @click="detailDialogVisible = false">关闭</el-button>
+        </template>
+      </el-dialog>
+    </teleport>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
 import { getStoredUser, parseJwtPayload } from '../utils/auth'
+import request from '../utils/request'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
+const navBarRef = ref(null)
+
+// 公告详情相关状态
+const detailDialogVisible = ref(false)
+const detailLoading = ref(false)
+const currentAnnouncement = ref({
+  id: null,
+  title: '',
+  content: '',
+  is_pinned: 0,
+  created_at: '',
+  updated_at: ''
+})
 
 const isAdmin = computed(() => {
   const user = getStoredUser()
   const tokenPayload = parseJwtPayload(localStorage.getItem('token'))
   return Number(user?.role ?? tokenPayload?.role) === 1
+})
+
+// 加载公告详情
+const loadAnnouncementDetail = async (announcementId) => {
+  detailLoading.value = true
+  try {
+    const res = await request.get(`/api/announcements/${announcementId}`)
+    if (res.data.code === 200 && res.data.data) {
+      currentAnnouncement.value = res.data.data
+      // 逐条标记已读（只标记当前这一条）
+      await request.put(`/api/announcements/${announcementId}/read`)
+    } else {
+      ElMessage.error('公告加载失败')
+    }
+  } catch (error) {
+    console.error('加载公告详情失败:', error)
+    ElMessage.error('公告加载失败: ' + (error?.message || '未知错误'))
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+// 格式化时间
+const formatDetailTime = (value) => {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '--'
+  return date.toLocaleString('zh-CN', {
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+// 处理 NavBar 发出的显示公告详情事件
+const handleShowAnnouncementDetail = async (announcementId) => {
+  detailDialogVisible.value = true
+  await loadAnnouncementDetail(announcementId)
+}
+
+// 监听 Dialog 关闭，刷新 NavBar 的公告红点
+watch(detailDialogVisible, (newVal) => {
+  if (!newVal && navBarRef.value) {
+    navBarRef.value.loadAnnouncements()
+  }
 })
 
 // 🎮 核心炫技：计算 3D 偏转角度
@@ -156,6 +259,54 @@ const handleMouseLeave = (e) => {
   background-color: #fafbfc; /* 更干净的背景色 */
   min-height: calc(100vh - 60px); 
   padding: 30px 10%; 
+}
+
+/* 公告详情 Dialog 样式 */
+.announcement-detail-content {
+  display: grid;
+  gap: var(--gap-lg);
+}
+
+.detail-header {
+  display: grid;
+  gap: var(--gap-md);
+}
+
+.detail-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.detail-tags {
+  display: flex;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.detail-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+}
+
+.detail-body {
+  padding: var(--gap-lg);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 400px;
+  overflow-y: auto;
 }
 
 /* 🌈 升级版 Banner */
