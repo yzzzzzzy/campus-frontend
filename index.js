@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken'); // 引入 Token 工具
 require('dotenv').config();
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 // 👉 [新增] 引入我们刚刚写好的数据库连接文件
 const db = require('./db');
 const authenticateToken = require('./auth'); // 引入保安
@@ -15,6 +16,11 @@ const app = express();
 const competitionPublishLimiter = new Map();
 const COMPETITION_PUBLISH_WINDOW_MS = 60 * 1000;
 const COMPETITION_PUBLISH_MAX = 3;
+const loginAttemptIpLimiter = new Map();
+const loginAttemptAccountLimiter = new Map();
+const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_ATTEMPT_IP_MAX = 20;
+const LOGIN_ATTEMPT_ACCOUNT_MAX = 5;
 const passwordResetRequestAccountLimiter = new Map();
 const passwordResetRequestIpLimiter = new Map();
 const PASSWORD_RESET_REQUEST_WINDOW_MS = 60 * 1000;
@@ -95,6 +101,40 @@ const toPositiveInt = (value) => {
 };
 const isHttpUrl = (value) => /^https?:\/\//i.test(value);
 const isStrongPassword = (value) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,50}$/.test(value);
+const getClientIp = (req) => normalizeString(req.ip || 'unknown');
+
+const getRecentAttemptState = (store, key, windowMs, now = Date.now()) => {
+    const history = store.get(key) || [];
+    const validHistory = history.filter(timestamp => now - timestamp <= windowMs);
+    store.set(key, validHistory);
+    return validHistory;
+};
+
+const isLoginRateLimited = (req, username) => {
+    const now = Date.now();
+    const clientIp = getClientIp(req);
+    const accountHistory = getRecentAttemptState(loginAttemptAccountLimiter, username, LOGIN_ATTEMPT_WINDOW_MS, now);
+    const ipHistory = getRecentAttemptState(loginAttemptIpLimiter, clientIp, LOGIN_ATTEMPT_WINDOW_MS, now);
+
+    return {
+        limited: accountHistory.length >= LOGIN_ATTEMPT_ACCOUNT_MAX || ipHistory.length >= LOGIN_ATTEMPT_IP_MAX,
+        clientIp,
+        now
+    };
+};
+
+const recordLoginFailure = (username, clientIp, now = Date.now()) => {
+    const accountHistory = getRecentAttemptState(loginAttemptAccountLimiter, username, LOGIN_ATTEMPT_WINDOW_MS, now);
+    const ipHistory = getRecentAttemptState(loginAttemptIpLimiter, clientIp, LOGIN_ATTEMPT_WINDOW_MS, now);
+
+    loginAttemptAccountLimiter.set(username, [...accountHistory, now]);
+    loginAttemptIpLimiter.set(clientIp, [...ipHistory, now]);
+};
+
+const clearLoginFailures = (username, clientIp) => {
+    loginAttemptAccountLimiter.delete(username);
+    loginAttemptIpLimiter.delete(clientIp);
+};
 
 const getTableColumns = async (tableName) => {
     if (tableColumnsCache.has(tableName)) {
@@ -306,7 +346,7 @@ app.use(cors({
         return callback(new Error('CORS origin not allowed'));
     }
 }));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // 原来的基础测试接口
@@ -396,14 +436,21 @@ app.post('/api/login', async (req, res) => {
         const { username, password } = req.body;
         const normalizedUsername = normalizeString(username);
         const normalizedPassword = normalizeString(password);
+        const clientIp = getClientIp(req);
 
         if (!normalizedUsername || !normalizedPassword) {
             return res.send({ code: 400, message: '账号和密码不能为空' });
         }
 
+        const rateLimitState = isLoginRateLimited(req, normalizedUsername);
+        if (rateLimitState.limited) {
+            return res.status(429).send({ code: 429, message: '登录尝试过于频繁，请15分钟后再试' });
+        }
+
         // 1. 去数据库里找这个账号
         const [users] = await db.query('SELECT * FROM users WHERE username = ?', [normalizedUsername]);
         if (users.length === 0) {
+            recordLoginFailure(normalizedUsername, clientIp, rateLimitState.now);
             return res.send({ code: 400, message: '账号不存在！' });
         }
 
@@ -416,8 +463,11 @@ app.post('/api/login', async (req, res) => {
         // 2. 核心考点：校验密码（将用户输入的明文和数据库里的密文进行安全比对）
         const isPasswordValid = bcrypt.compareSync(normalizedPassword, user.password);
         if (!isPasswordValid) {
+            recordLoginFailure(normalizedUsername, clientIp, rateLimitState.now);
             return res.send({ code: 400, message: '密码错误！' });
         }
+
+        clearLoginFailures(normalizedUsername, clientIp);
 
         // 3. 密码正确，颁发 JWT Token (电子通行证)
         // 注意：这里面千万不要放密码！只放 ID 和账号这种非敏感信息
@@ -2281,6 +2331,93 @@ app.get('/api/user/stats', authenticateToken, async (req, res) => {
     } catch (error) { sendApiError(res, 500); }
 });
 
+// ================= 文件 Magic Bytes 校验 =================
+// 每种文件格式的真实字节签名，防止仅靠 MIME/扩展名被伪造绕过
+const MAGIC_BYTES_SIGNATURES = {
+    jpeg: { offset: 0, bytes: Buffer.from([0xFF, 0xD8, 0xFF]) },
+    png: { offset: 0, bytes: Buffer.from([0x89, 0x50, 0x4E, 0x47]) },
+    gif: { offset: 0, bytes: Buffer.from([0x47, 0x49, 0x46, 0x38]) },
+    webp: {
+        offset: 0, bytes: Buffer.from([0x52, 0x49, 0x46, 0x46]), // RIFF
+        extra: { offset: 8, bytes: Buffer.from([0x57, 0x45, 0x42, 0x50]) }
+    }, // WEBP
+    pdf: { offset: 0, bytes: Buffer.from([0x25, 0x50, 0x44, 0x46]) },
+    zip: { offset: 0, bytes: Buffer.from([0x50, 0x4B, 0x03, 0x04]) }, // 含 docx/xlsx/pptx
+    rar: { offset: 0, bytes: Buffer.from([0x52, 0x61, 0x72, 0x21, 0x1A, 0x07]) },
+    sevenZ: { offset: 0, bytes: Buffer.from([0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C]) },
+    ole2: { offset: 0, bytes: Buffer.from([0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]) }, // 旧版 doc/xls/ppt
+};
+
+const IMAGE_MAGIC_TYPES = ['jpeg', 'png', 'gif', 'webp'];
+const ADMIN_DOC_MAGIC_TYPES = ['pdf', 'zip', 'rar', 'sevenZ', 'ole2'];
+
+/**
+ * 读取已落盘文件的前 N 字节，与已知签名比对
+ * @param {string} filePath 文件绝对路径
+ * @param {string[]} allowedTypes 允许的签名类型 key 数组
+ * @returns {{ valid: boolean, detected?: string, expectedMaxBytes: number }}
+ */
+const validateMagicBytes = (filePath, allowedTypes) => {
+    let maxNeeded = 0;
+    const checks = [];
+
+    for (const type of allowedTypes) {
+        const sig = MAGIC_BYTES_SIGNATURES[type];
+        if (!sig) continue;
+
+        const primaryEnd = sig.offset + sig.bytes.length;
+        const extraEnd = sig.extra ? sig.extra.offset + sig.extra.bytes.length : 0;
+        const needed = Math.max(primaryEnd, extraEnd);
+        if (needed > maxNeeded) maxNeeded = needed;
+
+        checks.push({ type, sig });
+    }
+
+    if (checks.length === 0) return { valid: true, detected: 'none', expectedMaxBytes: 0 };
+
+    let fileBytes;
+    try {
+        const fd = fs.openSync(filePath, 'r');
+        const buf = Buffer.alloc(maxNeeded);
+        const bytesRead = fs.readSync(fd, buf, 0, maxNeeded, 0);
+        fs.closeSync(fd);
+
+        if (bytesRead < maxNeeded) {
+            return { valid: false, detected: 'truncated', expectedMaxBytes: maxNeeded };
+        }
+        fileBytes = buf;
+    } catch (err) {
+        return { valid: false, detected: 'read-error', expectedMaxBytes: maxNeeded };
+    }
+
+    for (const { type, sig } of checks) {
+        const primaryMatch = fileBytes.compare(sig.bytes, 0, sig.bytes.length, sig.offset, sig.offset + sig.bytes.length) === 0;
+        if (!primaryMatch) continue;
+
+        if (sig.extra) {
+            const extraMatch = fileBytes.compare(sig.extra.bytes, 0, sig.extra.bytes.length, sig.extra.offset, sig.extra.offset + sig.extra.bytes.length) === 0;
+            if (!extraMatch) continue;
+        }
+
+        return { valid: true, detected: type, expectedMaxBytes: maxNeeded };
+    }
+
+    return { valid: false, detected: 'unknown', expectedMaxBytes: maxNeeded };
+};
+
+/**
+ * 校验失败后清理已落盘的恶意文件
+ */
+const cleanupUploadedFile = (filePath) => {
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    } catch (_) {
+        // 清理失败不阻塞，已记录
+    }
+};
+
 // 1. 配置磁盘存储
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -2324,7 +2461,7 @@ const adminUpload = multer({
     limits: { fileSize: 50 * 1024 * 1024 }, // 限制 50MB
 });
 
-// 2. 创建上传接口
+// 2. 创建上传接口（含 Magic Bytes 二次校验，防止 MIME 伪造）
 app.post('/api/upload', authenticateToken, (req, res) => {
     upload.single('file')(req, res, (error) => {
         if (error) {
@@ -2338,13 +2475,20 @@ app.post('/api/upload', authenticateToken, (req, res) => {
             return res.send({ code: 400, message: '请选择要上传的图片' });
         }
 
+        // Magic Bytes 二次校验：读取文件真实字节头
+        const { valid } = validateMagicBytes(req.file.path, IMAGE_MAGIC_TYPES);
+        if (!valid) {
+            cleanupUploadedFile(req.file.path);
+            return res.send({ code: 400, message: '文件内容校验失败，仅支持 JPG/PNG/GIF/WEBP 格式图片' });
+        }
+
         // 优先使用环境变量中的公网地址，未配置时自动使用当前请求域名
         const imgUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
         return res.send({ code: 200, message: '上传成功', url: imgUrl });
     });
 });
 
-// 👉 [新增] 管理员发布内容通用文件上传接口（支持文档/压缩包）
+// 👉 [新增] 管理员发布内容通用文件上传接口（支持文档/压缩包，含 Magic Bytes 校验）
 app.post('/api/admin/upload-file', isAdmin, (req, res) => {
     adminUpload.single('file')(req, res, (error) => {
         if (error) {
@@ -2356,6 +2500,16 @@ app.post('/api/admin/upload-file', isAdmin, (req, res) => {
 
         if (!req.file) {
             return res.send({ code: 400, message: '请选择要上传的文件' });
+        }
+
+        // Magic Bytes 二次校验：管理员上传需同时匹配图片或文档/压缩包签名
+        const allAdminTypes = [...IMAGE_MAGIC_TYPES, ...ADMIN_DOC_MAGIC_TYPES];
+        const { valid, detected } = validateMagicBytes(req.file.path, allAdminTypes);
+        // TXT 无可靠 Magic Bytes，允许 MIME 白名单直接放行
+        const isPlainText = req.file.mimetype === 'text/plain';
+        if (!valid && !isPlainText) {
+            cleanupUploadedFile(req.file.path);
+            return res.send({ code: 400, message: '文件内容校验失败，请上传真实格式的图片/PDF/Office文档/TXT/压缩包' });
         }
 
         const fileUrl = `${getServerBaseUrl(req)}/uploads/${req.file.filename}`;
