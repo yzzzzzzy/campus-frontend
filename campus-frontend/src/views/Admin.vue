@@ -41,6 +41,10 @@
             <el-icon><EditPen /></el-icon>
             <span>内容发布</span>
           </el-menu-item>
+          <el-menu-item index="announcements">
+            <el-icon><Bell /></el-icon>
+            <span>公告管理</span>
+          </el-menu-item>
         </el-menu>
 
         <div class="aside-footer">
@@ -481,9 +485,107 @@
                     <el-button type="primary" :loading="publishLoading" @click="handlePublishCareer">发布信息</el-button>
                   </div>
                 </el-tab-pane>
+
               </el-tabs>
             </el-card>
           </section>
+
+          <!-- 公告管理 -->
+          <section v-else-if="activeSection === 'announcements'" class="table-section">
+            <el-card class="panel-card" shadow="never">
+              <template #header>
+                <div class="panel-header">
+                  <span>公告管理</span>
+                  <div class="inline-actions">
+                    <el-tag type="info" effect="plain">共 {{ announcementTotal }} 条</el-tag>
+                    <el-button type="primary" @click="openAnnouncementEditDialog()">新增公告</el-button>
+                  </div>
+                </div>
+              </template>
+
+              <el-table :data="announcementList" v-loading="announcementLoading" stripe class="data-table">
+                <el-table-column prop="id" label="ID" width="70" />
+                <el-table-column prop="title" label="标题" min-width="180" show-overflow-tooltip />
+                <el-table-column prop="content" label="内容摘要" min-width="200" show-overflow-tooltip>
+                  <template #default="{ row }">
+                    {{ (row.content || '').slice(0, 40) }}{{ (row.content || '').length > 40 ? '...' : '' }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="置顶" width="90" align="center">
+                  <template #default="{ row }">
+                    <el-tag :type="row.is_pinned ? 'danger' : 'info'" effect="plain" size="small">
+                      {{ row.is_pinned ? '置顶' : '普通' }}
+                    </el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column label="发布时间" width="170">
+                  <template #default="{ row }">
+                    {{ formatDateTime(row.created_at) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="270" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" type="primary" plain @click="openAnnouncementEditDialog(row)">编辑</el-button>
+                    <el-button
+                      size="small"
+                      :type="row.is_pinned ? 'warning' : 'success'"
+                      plain
+                      @click="toggleAnnouncementPin(row)"
+                    >
+                      {{ row.is_pinned ? '取消置顶' : '置顶' }}
+                    </el-button>
+                    <el-button size="small" type="danger" plain @click="deleteAnnouncement(row)">删除</el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+
+              <div class="pagination-row" v-if="announcementTotal > 0">
+                <el-pagination
+                  v-model:current-page="announcementPage"
+                  v-model:page-size="announcementPageSize"
+                  :page-sizes="[10, 20, 50]"
+                  background
+                  layout="total, sizes, prev, pager, next"
+                  :total="announcementTotal"
+                  @size-change="loadAnnouncementList"
+                  @current-change="loadAnnouncementList"
+                />
+              </div>
+            </el-card>
+          </section>
+
+          <!-- 公告编辑弹窗 -->
+          <el-dialog
+            v-model="announcementEditDialogVisible"
+            :title="announcementEditId ? '编辑公告' : '新增公告'"
+            width="600px"
+            destroy-on-close
+          >
+            <el-form :model="announcementEditForm" label-position="top">
+              <el-form-item label="公告标题">
+                <el-input v-model="announcementEditForm.title" maxlength="100" show-word-limit placeholder="请输入公告标题" />
+              </el-form-item>
+              <el-form-item label="公告内容">
+                <el-input
+                  v-model="announcementEditForm.content"
+                  type="textarea"
+                  :rows="6"
+                  maxlength="2000"
+                  show-word-limit
+                  placeholder="请输入公告内容"
+                />
+              </el-form-item>
+              <el-form-item label="是否置顶">
+                <el-switch v-model="announcementEditForm.isPinned" inline-prompt active-text="置顶" inactive-text="普通" />
+              </el-form-item>
+            </el-form>
+            <template #footer>
+              <el-button @click="announcementEditDialogVisible = false">取消</el-button>
+              <el-button type="primary" :loading="announcementSaving" @click="saveAnnouncement">
+                {{ announcementEditId ? '保存修改' : '发布公告' }}
+              </el-button>
+            </template>
+          </el-dialog>
 
           <el-dialog v-model="createAdminDialogVisible" title="创建管理员账号" width="560px" destroy-on-close>
             <el-alert
@@ -545,7 +647,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request, { API_BASE_URL } from '../utils/request'
@@ -568,6 +670,21 @@ const adminUploadAction = `${API_BASE_URL}/api/admin/upload-file`
 const resourceTypeOptions = ['编程开发', '创意设计', '办公效率']
 const studyCategoryOptions = ['考研资料', '考公资料', '四六级']
 const careerTypeOptions = ['校招内推', '实习机会', '面试经验']
+
+// 公告管理状态
+const announcementList = ref([])
+const announcementLoading = ref(false)
+const announcementSaving = ref(false)
+const announcementPage = ref(1)
+const announcementPageSize = ref(20)
+const announcementTotal = ref(0)
+const announcementEditDialogVisible = ref(false)
+const announcementEditId = ref(null)
+const announcementEditForm = reactive({
+  title: '',
+  content: '',
+  isPinned: false
+})
 
 const stats = ref({
   totalUsers: 0,
@@ -660,7 +777,8 @@ const sectionTitle = computed(() => {
     users: '用户管理',
     posts: '内容审核',
     resetRequests: '密码申诉',
-    publish: '内容发布'
+    publish: '内容发布',
+    announcements: '公告管理'
   }
   return mapping[activeSection.value] || '管理员后台'
 })
@@ -1181,6 +1299,105 @@ const handlePublishCareer = async () => {
   }
 }
 
+// ========== 公告管理函数 ==========
+const loadAnnouncementList = async () => {
+  announcementLoading.value = true
+  try {
+    const res = await request.get('/api/admin/announcements', {
+      params: { page: announcementPage.value, limit: announcementPageSize.value }
+    })
+    if (res.data.code === 200) {
+      announcementList.value = res.data.data || []
+      announcementTotal.value = res.data.total || 0
+    }
+  } catch (error) {
+    ElMessage.error('获取公告列表失败')
+  } finally {
+    announcementLoading.value = false
+  }
+}
+
+const openAnnouncementEditDialog = (row = null) => {
+  if (row) {
+    announcementEditId.value = row.id
+    announcementEditForm.title = row.title
+    announcementEditForm.content = row.content
+    announcementEditForm.isPinned = !!row.is_pinned
+  } else {
+    announcementEditId.value = null
+    announcementEditForm.title = ''
+    announcementEditForm.content = ''
+    announcementEditForm.isPinned = false
+  }
+  announcementEditDialogVisible.value = true
+}
+
+const saveAnnouncement = async () => {
+  if (!announcementEditForm.title || !announcementEditForm.content) {
+    ElMessage.warning('请填写公告标题和内容')
+    return
+  }
+  announcementSaving.value = true
+  try {
+    let res
+    if (announcementEditId.value) {
+      res = await request.put(`/api/admin/announcements/${announcementEditId.value}`, {
+        title: announcementEditForm.title,
+        content: announcementEditForm.content,
+        is_pinned: announcementEditForm.isPinned ? 1 : 0
+      })
+    } else {
+      res = await request.post('/api/admin/announcements', {
+        title: announcementEditForm.title,
+        content: announcementEditForm.content,
+        is_pinned: announcementEditForm.isPinned ? 1 : 0
+      })
+    }
+    if (res.data.code === 200) {
+      ElMessage.success(announcementEditId.value ? '公告更新成功' : '公告发布成功')
+      announcementEditDialogVisible.value = false
+      await loadAnnouncementList()
+    } else {
+      ElMessage.error(res.data.message || '操作失败')
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.message || '操作失败')
+  } finally {
+    announcementSaving.value = false
+  }
+}
+
+const toggleAnnouncementPin = async (row) => {
+  try {
+    const res = await request.put(`/api/admin/announcements/${row.id}/pin`)
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message)
+      await loadAnnouncementList()
+    }
+  } catch (error) {
+    ElMessage.error('操作失败')
+  }
+}
+
+const deleteAnnouncement = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除公告「${row.title}」吗？删除后不可恢复。`,
+      '删除确认',
+      { confirmButtonText: '确认删除', cancelButtonText: '取消', type: 'warning' }
+    )
+    const res = await request.delete(`/api/admin/announcements/${row.id}`)
+    if (res.data.code === 200) {
+      ElMessage.success('公告已删除')
+      await loadAnnouncementList()
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error?.response?.data?.message || '删除失败')
+    }
+  }
+}
+
 const refreshAll = async () => {
   loading.value = true
   try {
@@ -1297,6 +1514,13 @@ onMounted(async () => {
     await refreshAll()
   } catch (error) {
     handleAdminApiError(error)
+  }
+})
+
+// 切换到公告管理时自动加载
+watch(activeSection, (val) => {
+  if (val === 'announcements') {
+    loadAnnouncementList()
   }
 })
 </script>
