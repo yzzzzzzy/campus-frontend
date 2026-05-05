@@ -33,7 +33,7 @@ jobs:
       - name: Package Backend Code
         run: |
           # 把后端代码打包，排除掉前端源码、依赖包和 git 记录，体积极小
-          tar -czvf backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' .
+          tar -czvf backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' --exclude='backend.tar.gz' .
 
       # ==============================
       # 3. CD 阶段：使用 SCP 将文件投递到腾讯云服务器
