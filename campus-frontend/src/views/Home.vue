@@ -236,7 +236,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, onMounted, onActivated } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
 import { getStoredUser, parseJwtPayload } from '../utils/auth'
@@ -463,12 +463,33 @@ const navigateToPost = (item) => {
   router.push(`/forum?postId=${item.id}`)
 }
 
-// 👉 [新增] 页面初始化时加载信息流
-import { onMounted } from 'vue'
-onMounted(async () => {
-  await loadLatest()
-  await loadTrending()
+// 👉 统一封装：根据当前 Tab 拉取相应数据
+const fetchFeedData = async () => {
+  if (activeFeedTab.value === 'latest') {
+    // 首次或切换到最新时重置分页（避免重复拼接）
+    latestPage.value = 1
+    latestList.value = []
+    latestTotal.value = 0
+    await loadLatest()
+  } else {
+    await loadTrending()
+  }
+}
+
+// 👉 页面第一次全量加载时触发
+onMounted(() => {
+  fetchFeedData()
 })
+
+// 👉 keep-alive 缓存页面每次激活时也要触发（如路由返回）
+onActivated(() => {
+  fetchFeedData()
+})
+
+// 👉 如果通过切 tab 切换数据，立即触发请求（immediate: true 确保首次也触发一次）
+watch(activeFeedTab, async () => {
+  await fetchFeedData()
+}, { immediate: true })
 
 // 👉 [新增] 监听路由变化，每次进入首页都刷新数据（解决登录后缓存问题）
 watch(() => route.path, async (newPath) => {
