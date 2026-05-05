@@ -32,7 +32,7 @@ jobs:
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD }}
+          key: ${{ secrets.SSH_KEY }}
           source: "campus-frontend/dist/*"
           target: "/var/www/campus-frontend/"
           strip_components: 2 # 剥离 campus-frontend/dist 这两层目录
@@ -43,7 +43,7 @@ jobs:
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
-          password: ${{ secrets.PASSWORD }}
+          key: ${{ secrets.SSH_KEY }}
           script: |
             # 进入后端项目目录（假设你的后端代码克隆在这里）
             cd /var/www/campus-backend
