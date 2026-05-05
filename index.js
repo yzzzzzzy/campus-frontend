@@ -2961,8 +2961,9 @@ const startServer = async () => {
             const limit = 20; // 每页20条
             const offset = (page - 1) * limit;
 
-            const [studyRows, resourceRows, careerRows, competitionRows, countRows] = await Promise.all([
-                db.query(`
+            // 聚合升学考公、个人提升、就业面经、竞赛组队四类内容
+            const [rows] = await db.query(`
+                SELECT * FROM (
                     SELECT
                         s.id,
                         s.title,
@@ -2973,8 +2974,9 @@ const startServer = async () => {
                         'study' AS feed_type,
                         '升学考公资料' AS source_name
                     FROM study_materials s
-                `),
-                db.query(`
+
+                    UNION ALL
+
                     SELECT
                         r.id,
                         r.title,
@@ -2985,8 +2987,9 @@ const startServer = async () => {
                         'resource' AS feed_type,
                         '个人提升资源' AS source_name
                     FROM resources r
-                `),
-                db.query(`
+
+                    UNION ALL
+
                     SELECT
                         c.id,
                         c.title,
@@ -2998,8 +3001,9 @@ const startServer = async () => {
                         '实习就业面经' AS source_name
                     FROM careers c
                     LEFT JOIN users u ON c.user_id = u.id
-                `),
-                db.query(`
+
+                    UNION ALL
+
                     SELECT
                         co.id,
                         co.title,
@@ -3011,31 +3015,20 @@ const startServer = async () => {
                         '竞赛组队大厅' AS source_name
                     FROM competitions co
                     LEFT JOIN users u ON co.user_id = u.id
-                `),
-                db.query(`
-                    SELECT
-                        (SELECT COUNT(*) FROM study_materials) +
-                        (SELECT COUNT(*) FROM resources) +
-                        (SELECT COUNT(*) FROM careers) +
-                        (SELECT COUNT(*) FROM competitions) AS total
-                `)
-            ]);
+                ) feed_items
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            `, [limit, offset]);
 
-            const mergedRows = [
-                ...(studyRows[0] || []),
-                ...(resourceRows[0] || []),
-                ...(careerRows[0] || []),
-                ...(competitionRows[0] || [])
-            ].sort((a, b) => {
-                const timeDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-                if (timeDiff !== 0) {
-                    return timeDiff;
-                }
-                return Number(b.id || 0) - Number(a.id || 0);
-            });
-
-            const rows = mergedRows.slice(offset, offset + limit);
-            const total = Number(countRows[0]?.[0]?.total || 0);
+            // 获取总数用于前端分页
+            const [countResult] = await db.query(`
+                SELECT
+                    (SELECT COUNT(*) FROM study_materials) +
+                    (SELECT COUNT(*) FROM resources) +
+                    (SELECT COUNT(*) FROM careers) +
+                    (SELECT COUNT(*) FROM competitions) AS total
+            `);
+            const total = countResult[0].total;
 
             res.send({
                 code: 200,
