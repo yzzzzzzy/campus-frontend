@@ -8,26 +8,37 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    
     steps:
-      # 1. 在 GitHub 官方服务器上拉取最新代码
       - name: Checkout Code
         uses: actions/checkout@v4
         
-      # 2. 建议显式指定 Node.js 版本，保证打包环境稳定
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # 如果你的项目需要更高版本可以改成 20
+          node-version: '20'
 
-      # 3. 在官方服务器上安装前端依赖并打包
+      # ==============================
+      # 1. CI 阶段：在 GitHub 官方服务器上打包前端
+      # ==============================
       - name: Build Frontend
         run: |
           cd campus-frontend
           npm install
           npm run build
 
-      # 4. 把打包好的 dist 目录通过 SCP 传到腾讯云的前端静态目录
-      - name: Deploy Frontend via SCP
+      # ==============================
+      # 2. CD 阶段：压缩后端代码（不依赖 git pull）
+      # ==============================
+      - name: Package Backend Code
+        run: |
+          # 把后端代码打包，排除掉前端源码、依赖包和 git 记录，体积极小
+          tar -czvf backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' .
+
+      # ==============================
+      # 3. CD 阶段：使用 SCP 将文件投递到腾讯云服务器
+      # ==============================
+      - name: Transfer Frontend Dist
         uses: appleboy/scp-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -35,25 +46,38 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           source: "campus-frontend/dist/*"
           target: "/var/www/campus-frontend/"
-          strip_components: 2 # 剥离 campus-frontend/dist 这两层目录
+          strip_components: 2
 
-      # 5. 通过 SSH 登录服务器，更新后端代码并重启 PM2 服务
-      - name: Update Backend & Restart
+      - name: Transfer Backend Archive
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          source: "backend.tar.gz"
+          target: "/var/www/campus-backend/"
+
+      # ==============================
+      # 4. CD 阶段：SSH 登录服务器执行解压与重启
+      # ==============================
+      - name: Extract and Restart Services
         uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            # 进入后端项目目录（假设你的后端代码克隆在这里）
+            set -e
             cd /var/www/campus-backend
             
-            # 使用国内镜像加速代理，解决后端服务器 git pull 超时 443 的问题
-            git remote set-url origin https://mirror.ghproxy.com/https://github.com/yzzzzzzy/campus-frontend.git
+            # 1. 解压收到的后端代码包，直接覆盖旧文件
+            tar -xzvf backend.tar.gz
+            rm backend.tar.gz
             
-            # 拉取最新代码并安装后端依赖
-            git pull
-            npm install
+            # 2. 安装后端依赖 (使用国内镜像加速)
+            npm install --registry=https://registry.npmmirror.com
             
-            # 重启后端守护进程
+            # 3. 重启后端服务
             pm2 restart campus-api
+            
+            echo "🚀 全栈 CI/CD 自动化部署大功告成！前端和后端均已更新至最新版本！"
