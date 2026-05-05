@@ -237,14 +237,13 @@
 
 <script setup>
 import { computed, ref, watch, onMounted, onActivated } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
 import { getStoredUser, parseJwtPayload } from '../utils/auth'
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
-const route = useRoute()
 const navBarRef = ref(null)
 
 // 导入图标
@@ -476,34 +475,20 @@ const fetchFeedData = async () => {
   }
 }
 
-// 👉 页面第一次全量加载时触发
+// 👉 页面第一次创建时触发
 onMounted(() => {
   fetchFeedData()
 })
 
-// 👉 keep-alive 缓存页面每次激活时也要触发（如路由返回）
+// 👉 keep-alive 缓存页面每次重新激活时触发（路由切回）
 onActivated(() => {
   fetchFeedData()
 })
 
-// 👉 如果通过切 tab 切换数据，立即触发请求（immediate: true 确保首次也触发一次）
-watch(activeFeedTab, async () => {
-  await fetchFeedData()
-}, { immediate: true })
-
-// 👉 [新增] 监听路由变化，每次进入首页都刷新数据（解决登录后缓存问题）
-watch(() => route.path, async (newPath) => {
-  if (newPath === '/home') {
-    // 重置分页和数据
-    latestPage.value = 1
-    latestList.value = []
-    latestTotal.value = 0
-    trendingList.value = []
-    // 重新拉取数据
-    await loadLatest()
-    await loadTrending()
-  }
-}, { immediate: false })
+// 👉 切换 Tab 时拉取对应数据
+watch(activeFeedTab, () => {
+  fetchFeedData()
+})
 </script>
 
 <style scoped>
