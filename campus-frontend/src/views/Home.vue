@@ -237,13 +237,14 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
 import { getStoredUser, parseJwtPayload } from '../utils/auth'
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
+const route = useRoute()
 const navBarRef = ref(null)
 
 // 导入图标
@@ -468,6 +469,20 @@ onMounted(async () => {
   await loadLatest()
   await loadTrending()
 })
+
+// 👉 [新增] 监听路由变化，每次进入首页都刷新数据（解决登录后缓存问题）
+watch(() => route.path, async (newPath) => {
+  if (newPath === '/home') {
+    // 重置分页和数据
+    latestPage.value = 1
+    latestList.value = []
+    latestTotal.value = 0
+    trendingList.value = []
+    // 重新拉取数据
+    await loadLatest()
+    await loadTrending()
+  }
+}, { immediate: false })
 </script>
 
 <style scoped>

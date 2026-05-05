@@ -2917,6 +2917,11 @@ const startServer = async () => {
     // 1. 最新资讯流（分页，每页20条，可一直浏览）
     app.get('/api/feed/latest', async (req, res) => {
         try {
+            // 防止浏览器缓存动态内容
+            res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
+            res.set('Pragma', 'no-cache');
+            res.set('Expires', '0');
+
             const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
             const limit = 20; // 每页20条
             const offset = (page - 1) * limit;
@@ -3007,6 +3012,11 @@ const startServer = async () => {
     // 2. 热门帖子（按点赞+评论+收藏的加权热度排序，只取前10条）
     app.get('/api/feed/trending', async (req, res) => {
         try {
+            // 防止浏览器缓存动态内容
+            res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0');
+            res.set('Pragma', 'no-cache');
+            res.set('Expires', '0');
+
             const [rows] = await db.query(`
             SELECT 
                 p.id,
