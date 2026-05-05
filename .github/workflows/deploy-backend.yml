@@ -82,5 +82,8 @@ jobs:
             
             # 3. 重启后端服务
             pm2 restart campus-api
+
+            # 4. 清理旧版前端文件（避免磁盘堆积）
+            cd /var/www/campus-frontend && find ./assets -type f -mtime +7 -delete 2>/dev/null || true
             
             echo "🚀 全栈 CI/CD 自动化部署大功告成！前端和后端均已更新至最新版本！"
