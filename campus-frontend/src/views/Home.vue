@@ -7,7 +7,6 @@
         bgColor="#409EFF"
         @show-announcement-detail="handleShowAnnouncementDetail"
       />
-
       <el-main class="main-content">
         <div class="hero-banner">
           <div class="banner-content">
@@ -98,9 +97,104 @@
           <h2>🌟 平台最新资讯</h2>
           <p class="section-subtitle">持续汇聚校园最热话题</p>
           <el-divider />
-          <el-empty description="个性化信息流正在生成中..." :image-size="120" />
         </div>
 
+        <div class="feed-section">
+          <el-tabs v-model="activeFeedTab">
+            <el-tab-pane label="📰 最新资讯" name="latest">
+              <div class="feed-content">
+                <!-- 加载状态 -->
+                <div v-if="latestLoading && latestList.length === 0" class="loading-state">
+                  <el-skeleton :rows="5" animated />
+                </div>
+                
+                <!-- 资源列表 -->
+                  <div v-else-if="latestList.length > 0" class="feed-list">
+                  <div 
+                    v-for="item in latestList" 
+                    :key="`latest-${item.id}`"
+                    class="feed-card"
+                    @click="navigateToFeedItem(item)">
+                    <div class="card-header">
+                      <div class="card-tags">
+                        <el-tag>{{ item.category }}</el-tag>
+                        <el-tag type="info" effect="plain">{{ item.source_name || '最新资讯' }}</el-tag>
+                      </div>
+                      <span class="time">{{ formatTime(item.created_at) }}</span>
+                    </div>
+                    <h3 class="card-title">{{ item.title }}</h3>
+                    <p class="card-excerpt">{{ truncateText(item.content, 80) }}</p>
+                    <div class="card-footer">
+                      <span class="author">{{ item.author_name || '匿名用户' }}</span>
+                    </div>
+                  </div>
+
+                  <!-- 加载更多按钮 -->
+                  <div class="load-more-container">
+                    <el-button 
+                      v-if="latestHasMore"
+                      @click="loadMoreLatest"
+                      :loading="latestLoading"
+                      type="primary"
+                      plain>
+                      加载更多
+                    </el-button>
+                      <p v-else class="no-more">已加载全部资讯</p>
+                  </div>
+                </div>
+
+                <!-- 空状态 -->
+                  <el-empty v-else description="暂无资讯" :image-size="100" />
+              </div>
+            </el-tab-pane>
+
+            <el-tab-pane label="🔥 热门帖子" name="trending">
+              <div class="feed-content">
+                <!-- 加载状态 -->
+                <div v-if="trendingLoading" class="loading-state">
+                  <el-skeleton :rows="5" animated />
+                </div>
+
+                <!-- 帖子列表 -->
+                <div v-else-if="trendingList.length > 0" class="feed-list">
+                  <div 
+                    v-for="(item, index) in trendingList"
+                    :key="`trending-${item.id}`"
+                    class="feed-card trending-card"
+                    @click="navigateToPost(item)">
+                    <div class="ranking-badge">{{ index + 1 }}</div>
+                    <div class="card-header">
+                      <el-tag type="danger">{{ item.category_name || '其他' }}</el-tag>
+                      <span class="time">{{ formatTime(item.created_at) }}</span>
+                    </div>
+                    <h3 class="card-title">{{ item.title }}</h3>
+                    <p class="card-excerpt">{{ truncateText(item.content, 80) }}</p>
+                    <div class="card-stats">
+                      <span>
+                        <el-icon><Pointer /></el-icon>
+                        {{ item.like_count }}
+                      </span>
+                      <span>
+                        <el-icon><ChatDotRound /></el-icon>
+                        {{ item.comment_count }}
+                      </span>
+                      <span>
+                        <el-icon><Star /></el-icon>
+                        {{ item.favorite_count }}
+                      </span>
+                    </div>
+                    <div class="card-footer">
+                      <span class="author">{{ item.author_name || '匿名用户' }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 空状态 -->
+                <el-empty v-else description="暂无热门帖子" :image-size="100" />
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </div>
       </el-main>
     </el-container>
 
@@ -152,6 +246,23 @@ import { ElMessage } from 'element-plus'
 const router = useRouter()
 const navBarRef = ref(null)
 
+// 导入图标
+import { Pointer, ChatDotRound, Star } from '@element-plus/icons-vue'
+
+
+// 👉 [新增] 信息流相关状态
+const activeFeedTab = ref('latest')
+const latestList = ref([])
+const latestPage = ref(1)
+const latestTotal = ref(0)
+const latestLoading = ref(false)
+const trendingList = ref([])
+const trendingLoading = ref(false)
+
+// 计算是否还有更多最新资源
+const latestHasMore = computed(() => {
+  return latestList.value.length < latestTotal.value
+})
 // 公告详情相关状态
 const detailDialogVisible = ref(false)
 const detailLoading = ref(false)
@@ -252,6 +363,111 @@ const handleMouseLeave = (e) => {
   card.style.boxShadow = `0 10px 20px rgba(0,0,0,0.03)`
 }
 
+// 👉 [新增] 加载最新资讯
+const loadLatest = async () => {
+  latestLoading.value = true
+  try {
+    const res = await request.get('/api/feed/latest', {
+      params: { page: latestPage.value }
+    })
+    if (res.data.code === 200) {
+      if (latestPage.value === 1) {
+        latestList.value = res.data.data
+      } else {
+        latestList.value.push(...res.data.data)
+      }
+      latestTotal.value = res.data.total
+    }
+  } catch (error) {
+    console.error('加载最新资讯失败:', error)
+  } finally {
+    latestLoading.value = false
+  }
+}
+
+// 👉 [新增] 加载更多最新资讯
+const loadMoreLatest = async () => {
+  latestPage.value++
+  await loadLatest()
+}
+
+// 👉 [新增] 加载热门帖子
+const loadTrending = async () => {
+  trendingLoading.value = true
+  try {
+    const res = await request.get('/api/feed/trending')
+    if (res.data.code === 200) {
+      trendingList.value = res.data.data
+    }
+  } catch (error) {
+    console.error('加载热门帖子失败:', error)
+  } finally {
+    trendingLoading.value = false
+  }
+}
+
+// 👉 [新增] 格式化时间（相对时间）
+const formatTime = (value) => {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '--'
+  
+  const now = new Date()
+  const diffMs = now - date
+  const diffSec = Math.floor(diffMs / 1000)
+  const diffMin = Math.floor(diffSec / 60)
+  const diffHour = Math.floor(diffMin / 60)
+  const diffDay = Math.floor(diffHour / 24)
+  
+  if (diffSec < 60) return '刚刚'
+  if (diffMin < 60) return `${diffMin}分钟前`
+  if (diffHour < 24) return `${diffHour}小时前`
+  if (diffDay < 30) return `${diffDay}天前`
+  
+  return date.toLocaleDateString('zh-CN')
+}
+
+// 👉 [新增] 截断文本
+const truncateText = (text, length) => {
+  if (!text) return ''
+  return text.length > length ? text.substring(0, length) + '...' : text
+}
+
+// 👉 [新增] 导航到信息流来源页面
+const navigateToFeedItem = (item) => {
+  if (item.feed_type === 'study') {
+    router.push(`/study?materialId=${item.id}`)
+    return
+  }
+
+  if (item.feed_type === 'resource') {
+    router.push(`/skills?resourceId=${item.id}`)
+    return
+  }
+
+  if (item.feed_type === 'career') {
+    router.push(`/career?careerId=${item.id}`)
+    return
+  }
+
+  if (item.feed_type === 'competition') {
+    router.push(`/competition?compId=${item.id}`)
+    return
+  }
+
+  router.push('/home')
+}
+// 👉 [新增] 导航到帖子详情
+const navigateToPost = (item) => {
+  router.push(`/forum?postId=${item.id}`)
+}
+
+// 👉 [新增] 页面初始化时加载信息流
+import { onMounted } from 'vue'
+onMounted(async () => {
+  await loadLatest()
+  await loadTrending()
+})
 </script>
 
 <style scoped>
@@ -490,4 +706,169 @@ const handleMouseLeave = (e) => {
     font-size: 18px;
   }
 }
+  /* 信息流样式 */
+  .feed-section {
+    margin-top: 30px;
+    padding: 20px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .feed-content {
+    padding: 20px 0;
+  }
+
+  .loading-state {
+    padding: 20px;
+  }
+
+  .feed-list {
+    display: grid;
+    gap: 16px;
+  }
+
+  .feed-card {
+    padding: 16px;
+    border: 1px solid #e8e8e8;
+    border-radius: 10px;
+    background: #fafbfc;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
+  .feed-card:hover {
+    border-color: #409EFF;
+    background: white;
+    box-shadow: 0 4px 16px rgba(64, 158, 255, 0.12);
+  }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-size: 12px;
+  }
+
+  .card-tags {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .time {
+    color: #999;
+    white-space: nowrap;
+  }
+
+  .card-title {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1e293b;
+    line-height: 1.4;
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-excerpt {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    color: #666;
+    line-height: 1.6;
+    display: -webkit-box;
+    line-clamp: 2;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-stats {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 10px;
+    font-size: 12px;
+    color: #999;
+  }
+
+  .card-stats span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    color: #999;
+  }
+
+  .author {
+    color: #666;
+  }
+
+  .ranking-badge {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    line-height: 28px;
+    text-align: center;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FF6B6B, #FF8E72);
+    color: white;
+    font-weight: bold;
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+
+  .trending-card {
+    position: relative;
+  }
+
+  .load-more-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    margin-top: 30px;
+    padding: 20px 0;
+  }
+
+  .no-more {
+    text-align: center;
+    color: #999;
+    font-size: 13px;
+    margin: 0;
+  }
+
+  @media (max-width: 768px) {
+    .feed-section {
+      margin-top: 20px;
+      padding: 12px;
+    }
+
+    .feed-content {
+      padding: 12px 0;
+    }
+
+    .feed-card {
+      padding: 12px;
+    }
+
+    .card-title {
+      font-size: 15px;
+    }
+
+    .card-excerpt {
+      font-size: 12px;
+    }
+  }
 </style>

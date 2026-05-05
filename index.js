@@ -2913,6 +2913,136 @@ const startServer = async () => {
         console.warn('自动检查数据库表结构失败，继续启动服务:', error.message);
     }
 
+    // 👉 [新增] 信息流聚合接口
+    // 1. 最新资讯流（分页，每页20条，可一直浏览）
+    app.get('/api/feed/latest', async (req, res) => {
+        try {
+            const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+            const limit = 20; // 每页20条
+            const offset = (page - 1) * limit;
+
+            // 聚合升学考公、个人提升、就业面经、竞赛组队四类内容
+            const [rows] = await db.query(`
+                SELECT * FROM (
+                    SELECT
+                        s.id,
+                        s.title,
+                        s.description AS content,
+                        s.category AS category,
+                        NULL AS author_name,
+                        s.created_at,
+                        'study' AS feed_type,
+                        '升学考公资料' AS source_name
+                    FROM study_materials s
+
+                    UNION ALL
+
+                    SELECT
+                        r.id,
+                        r.title,
+                        r.description AS content,
+                        r.type AS category,
+                        NULL AS author_name,
+                        r.created_at,
+                        'resource' AS feed_type,
+                        '个人提升资源' AS source_name
+                    FROM resources r
+
+                    UNION ALL
+
+                    SELECT
+                        c.id,
+                        c.title,
+                        c.content AS content,
+                        c.type AS category,
+                        u.nickname AS author_name,
+                        c.created_at,
+                        'career' AS feed_type,
+                        '实习就业面经' AS source_name
+                    FROM careers c
+                    LEFT JOIN users u ON c.user_id = u.id
+
+                    UNION ALL
+
+                    SELECT
+                        co.id,
+                        co.title,
+                        co.description AS content,
+                        co.comp_name AS category,
+                        u.nickname AS author_name,
+                        co.created_at,
+                        'competition' AS feed_type,
+                        '竞赛组队大厅' AS source_name
+                    FROM competitions co
+                    LEFT JOIN users u ON co.user_id = u.id
+                ) feed_items
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            `, [limit, offset]);
+
+            // 获取总数用于前端分页
+            const [countResult] = await db.query(`
+                SELECT
+                    (SELECT COUNT(*) FROM study_materials) +
+                    (SELECT COUNT(*) FROM resources) +
+                    (SELECT COUNT(*) FROM careers) +
+                    (SELECT COUNT(*) FROM competitions) AS total
+            `);
+            const total = countResult[0].total;
+
+            res.send({
+                code: 200,
+                message: '获取最新资讯成功',
+                data: rows,
+                total,
+                page,
+                limit
+            });
+        } catch (error) {
+            console.error('获取信息流失败:', error);
+            res.status(500).send({ code: 500, message: '服务器内部错误' });
+        }
+    });
+
+    // 2. 热门帖子（按点赞+评论+收藏的加权热度排序，只取前10条）
+    app.get('/api/feed/trending', async (req, res) => {
+        try {
+            const [rows] = await db.query(`
+            SELECT 
+                p.id,
+                p.title,
+                p.content,
+                p.tags,
+                u.nickname as author_name,
+                c.name as category_name,
+                p.created_at,
+                COALESCE(likes_count, 0) as like_count,
+                COALESCE(comment_count, 0) as comment_count,
+                COALESCE(favorite_count, 0) as favorite_count,
+                (COALESCE(likes_count, 0) + COALESCE(comment_count, 0) + COALESCE(favorite_count, 0) * 2) as heat_score,
+                'post' as feed_type
+            FROM posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            LEFT JOIN categories c ON p.category_id = c.id
+            LEFT JOIN (SELECT post_id, COUNT(*) as likes_count FROM post_likes GROUP BY post_id) pl ON p.id = pl.post_id
+            LEFT JOIN (SELECT post_id, COUNT(*) as comment_count FROM comments GROUP BY post_id) cm ON p.id = cm.post_id
+            LEFT JOIN (SELECT target_id, COUNT(*) as favorite_count FROM favorites WHERE target_type = 'post' GROUP BY target_id) fv ON p.id = fv.target_id
+            ORDER BY heat_score DESC, p.created_at DESC
+            LIMIT 10
+        `);
+
+            res.send({
+                code: 200,
+                message: '获取热门帖子成功',
+                data: rows
+            });
+        } catch (error) {
+            console.error('获取热门帖子失败:', error);
+            res.status(500).send({ code: 500, message: '服务器内部错误' });
+        }
+    });
+
+    const PORT = process.env.PORT || 3000;
     app.listen(PORT, () => {
         console.log(`----------------------------------------`);
         console.log(`🚀 后端服务已启动!`);
