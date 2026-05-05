@@ -90,6 +90,23 @@ const getServerBaseUrl = (req) => {
     return `${req.protocol}://${req.get('host')}`;
 };
 
+const normalizePublicUrl = (value, req) => {
+    if (!value || typeof value !== 'string') return value;
+
+    const serverBaseUrl = getServerBaseUrl(req);
+    const localUploadUrlPattern = /^https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)(?::\d+)?\/uploads\//i;
+
+    if (localUploadUrlPattern.test(value)) {
+        return value.replace(/^https?:\/\/(?:localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0)(?::\d+)?/i, serverBaseUrl);
+    }
+
+    if (value.startsWith('/uploads/')) {
+        return `${serverBaseUrl}${value}`;
+    }
+
+    return value;
+};
+
 const normalizeString = (value) => (typeof value === 'string' ? value.trim() : '');
 const ADMIN_DEFAULT_RESET_PASSWORD = normalizeString(process.env.ADMIN_DEFAULT_RESET_PASSWORD || '123456');
 const normalizeOptionalString = (value) => {
@@ -776,7 +793,14 @@ app.get('/api/user/info', authenticateToken, async (req, res) => {
         if (users.length === 0) {
             return res.send({ code: 400, message: '找不到该用户' });
         }
-        res.send({ code: 200, message: '获取成功', data: users[0] });
+        res.send({
+            code: 200,
+            message: '获取成功',
+            data: {
+                ...users[0],
+                avatar: normalizePublicUrl(users[0].avatar, req)
+            }
+        });
     } catch (error) {
         console.error('获取用户信息失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
@@ -1070,8 +1094,11 @@ app.get('/api/messages/conversations', authenticateToken, async (req, res) => {
                 last_message_at: lastMsgRows ? lastMsgRows.created_at : c.last_message_at,
                 last_message_preview: lastMsgRows ? (String(lastMsgRows.content).slice(0, 120)) : '',
                 unread_count: Number(unreadRows[0]?.cnt || 0),
-                peer: memberRows[0] || null,
-                avatar: (memberRows[0] && memberRows[0].avatar) || null,
+                peer: memberRows[0] ? {
+                    ...memberRows[0],
+                    avatar: normalizePublicUrl(memberRows[0].avatar, req)
+                } : null,
+                avatar: memberRows[0] ? normalizePublicUrl(memberRows[0].avatar, req) : null,
                 peer_name: (memberRows[0] && memberRows[0].nickname) || '群聊'
             });
         }
@@ -1186,7 +1213,10 @@ app.post('/api/conversations', authenticateToken, async (req, res) => {
 
         // 返回会话基础信息
         const [peerRows] = await db.query('SELECT id, nickname, avatar FROM users WHERE id = ? LIMIT 1', [toUserId]);
-        res.send({ code: 200, message: '会话已就绪', data: { conversation_id: convId, peer: peerRows[0] || null } });
+        const peer = peerRows[0]
+            ? { ...peerRows[0], avatar: normalizePublicUrl(peerRows[0].avatar, req) }
+            : null;
+        res.send({ code: 200, message: '会话已就绪', data: { conversation_id: convId, peer } });
     } catch (error) {
         console.error('创建会话失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
@@ -2010,7 +2040,12 @@ app.get('/api/comments/:postId', async (req, res) => {
         `;
         const [rows] = await db.query(query, [postId]);
 
-        res.send({ code: 200, message: '获取评论成功', data: rows });
+        const normalizedRows = rows.map((row) => ({
+            ...row,
+            avatar: normalizePublicUrl(row.avatar, req)
+        }));
+
+        res.send({ code: 200, message: '获取评论成功', data: normalizedRows });
     } catch (error) {
         console.error('获取评论失败:', error);
         res.status(500).send({ code: 500, message: '服务器内部错误' });
