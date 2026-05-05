@@ -28,12 +28,14 @@ jobs:
           npm run build
 
       # ==============================
-      # 2. CD 阶段：压缩后端代码（不依赖 git pull）
+      # 2. CD 阶段：压缩后端代码（使用隔离目录防报错）
       # ==============================
       - name: Package Backend Code
         run: |
-          # 把后端代码打包，排除掉前端源码、依赖包和 git 记录，体积极小
-          tar -czvf backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' --exclude='backend.tar.gz' .
+          # 创建一个专用的临时文件夹
+          mkdir -p deploy_tmp
+          # 把压缩包生成在临时文件夹里，同时把这个临时文件夹本身排除掉
+          tar -czvf deploy_tmp/backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' --exclude='deploy_tmp' .
 
       # ==============================
       # 3. CD 阶段：使用 SCP 将文件投递到腾讯云服务器
@@ -54,11 +56,12 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SERVER_SSH_KEY }}
-          source: "backend.tar.gz"
+          source: "deploy_tmp/backend.tar.gz"   # 注意：这里的路径加上了 deploy_tmp/
           target: "/var/www/campus-backend/"
+          strip_components: 1                   # 关键魔法：剥离掉 deploy_tmp 这个文件夹外壳，让压缩包直接躺在后端的根目录下
 
       # ==============================
-      # 4. CD 阶段：SSH 登录服务器执行解压与重启
+      # 4. CD 阶段：SSH 登录服务器执行解压与重启 (这一步的代码完全不需要动！)
       # ==============================
       - name: Extract and Restart Services
         uses: appleboy/ssh-action@master
