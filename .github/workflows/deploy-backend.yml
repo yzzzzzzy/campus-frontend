@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18' # 如果你的项目需要更高版本可以改成 20
+          node-version: '20' # 如果你的项目需要更高版本可以改成 20
 
       # 3. 在官方服务器上安装前端依赖并打包
       - name: Build Frontend
