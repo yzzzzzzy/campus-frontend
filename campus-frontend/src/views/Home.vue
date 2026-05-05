@@ -256,9 +256,9 @@ const activeFeedTab = ref('latest')
 const latestList = ref([])
 const latestPage = ref(1)
 const latestTotal = ref(0)
-const latestLoading = ref(false)
+const latestLoading = ref(true)
 const trendingList = ref([])
-const trendingLoading = ref(false)
+const trendingLoading = ref(true)
 
 // 计算是否还有更多最新资源
 const latestHasMore = computed(() => {
