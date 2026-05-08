@@ -47,7 +47,7 @@
           </el-menu-item>
           <el-menu-item index="settings">
             <el-icon><Setting /></el-icon>
-            <span>系统设置</span>
+            <span>AI配置</span>
           </el-menu-item>
         </el-menu>
 
@@ -962,7 +962,7 @@ const sectionTitle = computed(() => {
     resetRequests: '密码申诉',
     publish: '内容发布',
     announcements: '公告管理',
-    settings: '系统设置'
+    settings: 'AI配置'
   }
   return mapping[activeSection.value] || '管理员后台'
 })
