@@ -10,19 +10,15 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuthStore } from './stores/auth'
 import AiChat from './components/AiChat.vue'
 
 const route = useRoute()
-const hasToken = ref(!!localStorage.getItem('token'))
-
-// 每次路由变化时重新检查登录状态
-watch(() => route.path, () => {
-  hasToken.value = !!localStorage.getItem('token')
-})
+const auth = useAuthStore()
 
 const showAiChat = computed(() => {
-  return hasToken.value && route.path !== '/login'
+  return auth.isLoggedIn && route.path !== '/login'
 })
 </script>

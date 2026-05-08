@@ -42,7 +42,7 @@
 
       <el-main class="main-content">
         <div class="filter-container">
-          <el-tabs v-model="activeType" class="category-tabs" @tab-change="fetchCareers">
+          <el-tabs v-model="activeType" class="category-tabs" @tab-change="handleFilterChange">
             <el-tab-pane label="全部信息" name=""></el-tab-pane>
             <el-tab-pane label="🚀 校招内推" name="校招内推"></el-tab-pane>
             <el-tab-pane label="💻 实习机会" name="实习机会"></el-tab-pane>
@@ -55,8 +55,8 @@
               placeholder="搜索公司、岗位或面经..." 
               prefix-icon="Search"
               clearable
-              @clear="fetchCareers"
-              @keyup.enter="fetchCareers"
+              @clear="handleFilterChange"
+              @keyup.enter="handleFilterChange"
               style="width: 220px;"
             />
             <el-button type="warning" @click="publishDialogVisible = true" icon="EditPen">分享面经</el-button>
@@ -111,18 +111,13 @@
         </el-row>
 
         <el-empty v-if="careerList.length === 0" description="暂无相关信息" />
-        <div class="pagination-container" v-if="totalItems > 0">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :page-sizes="[5, 10, 20, 50]"
-            background
-            layout="total, sizes, prev, pager, next, jumper"
-            :total="totalItems"
-            @size-change="handleSizeChange"
-            @current-change="handleCurrentChange"
-          />
-        </div>
+        <PaginationBar
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="totalItems"
+          @current-change="handleCurrentChange"
+          @size-change="handleSizeChange"
+        />
       </el-main>
     </el-container>
   </div>
@@ -134,12 +129,14 @@ import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import NavBar from '../components/NavBar.vue'
+import PaginationBar from '../components/PaginationBar.vue'
+import { usePagination } from '../utils/composables/usePagination'
+import { useFavorites } from '../utils/composables/useFavorites'
 
 const router = useRouter()
 const activeType = ref('')
 const searchQuery = ref('') // 👉 [新增] 用来存放搜索框里输入的文字
 const careerList = ref([])
-const myFavoriteIds = ref([])
 const isPageActive = ref(true)
 const publishDialogVisible = ref(false)
 const publishing = ref(false)
@@ -150,45 +147,8 @@ const publishForm = ref({
   tags: ''
 })
 
-// 👉 [新增] 分页相关变量
-const currentPage = ref(1)
-const pageSize = ref(10)
-const totalItems = ref(0)
-
-// 👉 [新增] 当切换分类或敲击回车搜索时，务必将页码重置为 1
-const handleFilterChange = () => {
-  currentPage.value = 1
-  fetchCareers() // Study里就是 fetchStudyMaterials，Skills里是 fetchResources
-}
-
-// 👉 [新增] 分页组件触发的方法
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  currentPage.value = 1
-  fetchCareers()
-}
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  fetchCareers()
-}
-
-const syncFavoriteIds = (targetId, shouldInclude) => {
-  const ids = new Set(myFavoriteIds.value)
-  if (shouldInclude) {
-    ids.add(targetId)
-  } else {
-    ids.delete(targetId)
-  }
-  myFavoriteIds.value = Array.from(ids)
-}
-
-const fetchMyFavorites = async () => {
-  try {
-    const res = await request.get('/api/user/favorites', { params: { type: 'career' } })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
-  } catch (error) { }
-}
+const { currentPage, pageSize, totalItems, handleFilterChange, handleSizeChange, handleCurrentChange } = usePagination(() => fetchCareers())
+const { myFavoriteIds, fetchMyFavorites, handleFavorite } = useFavorites('career')
 const fetchCareers = async () => {
   try {
     const res = await request.get('/api/careers', { 
@@ -227,23 +187,6 @@ const handleApply = (contact) => {
     confirmButtonText: '知道了',
     type: 'info',
   })
-}
-
-// 👉 [新增] 3. 收藏点击事件
-const handleFavorite = async (item) => {
-  try {
-    const res = await request.post('/api/favorites/toggle', {
-      target_id: item.id,
-      target_type: 'career' // 告诉后端收藏的是实习信息
-    })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      ElMessage.success(res.data.message)
-      const nextFavorited = !item.is_favorited
-      item.is_favorited = nextFavorited
-      syncFavoriteIds(item.id, nextFavorited)
-    }
-  } catch (error) { ElMessage.error('操作失败') }
 }
 
 const handlePublishExperience = async () => {

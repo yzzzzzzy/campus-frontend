@@ -56,10 +56,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../utils/request'
+import { useAuthStore } from '../stores/auth'
 
 const conversations = ref([])
 const selectedConversation = ref(null)
@@ -67,7 +68,7 @@ const messages = ref([])
 const draftMessage = ref('')
 const searchQuery = ref('')
 const defaultAvatar = 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
-const currentUserId = Number(JSON.parse(localStorage.getItem('user') || '{}').id || 0)
+const currentUserId = computed(() => useAuthStore().userId || 0)
 const chatContainer = ref(null)
 const isSending = ref(false)
 let pollTimer = null

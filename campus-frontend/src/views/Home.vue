@@ -239,9 +239,9 @@
 import { computed, ref, watch, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
-import { getStoredUser, parseJwtPayload } from '../utils/auth'
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const navBarRef = ref(null)
@@ -275,11 +275,7 @@ const currentAnnouncement = ref({
   updated_at: ''
 })
 
-const isAdmin = computed(() => {
-  const user = getStoredUser()
-  const tokenPayload = parseJwtPayload(localStorage.getItem('token'))
-  return Number(user?.role ?? tokenPayload?.role) === 1
-})
+const isAdmin = computed(() => useAuthStore().isAdmin)
 
 // 加载公告详情
 const loadAnnouncementDetail = async (announcementId) => {

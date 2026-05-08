@@ -62,18 +62,13 @@
           </div>
           
         </el-card>
-        <div class="pagination-container" v-if="totalItems > 0">
-            <el-pagination
-              v-model:current-page="currentPage"
-              v-model:page-size="pageSize"
-              :page-sizes="[5, 10, 20, 50]"
-              background
-              layout="total, sizes, prev, pager, next, jumper"
-              :total="totalItems"
-              @size-change="handleSizeChange"
-              @current-change="handleCurrentChange"
-            />
-          </div>
+        <PaginationBar
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="totalItems"
+          @current-change="handleCurrentChange"
+          @size-change="handleSizeChange"
+        />
 
       </el-main>
     </el-container>
@@ -86,58 +81,18 @@ import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import NavBar from '../components/NavBar.vue'
+import PaginationBar from '../components/PaginationBar.vue'
+import { usePagination } from '../utils/composables/usePagination'
+import { useFavorites } from '../utils/composables/useFavorites'
 
 const router = useRouter()
 const activeCategory = ref('')
 const searchQuery = ref('')
 const studyList = ref([])
-const myFavoriteIds = ref([])
 const isPageActive = ref(true)
 
-// 👉 [新增] 分页相关变量
-const currentPage = ref(1)
-const pageSize = ref(10)
-const totalItems = ref(0)
-
-// 👉 [新增] 统一的过滤/搜索处理器（切换分类或搜索时，强制回到第1页）
-const handleFilterChange = () => {
-  currentPage.value = 1
-  fetchStudyMaterials()
-}
-
-// 👉 [新增] 每页条数改变的回调
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  currentPage.value = 1
-  fetchStudyMaterials()
-}
-
-// 👉 [新增] 当前页码改变的回调
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  fetchStudyMaterials()
-}
-
-const syncFavoriteIds = (targetId, shouldInclude) => {
-  const ids = new Set(myFavoriteIds.value)
-  if (shouldInclude) {
-    ids.add(targetId)
-  } else {
-    ids.delete(targetId)
-  }
-  myFavoriteIds.value = Array.from(ids)
-}
-
-// 1. 获取用户在 study 模块的收藏记录
-const fetchMyFavorites = async () => {
-  try {
-    const res = await request.get('/api/user/favorites', { params: { type: 'study' } }) // 明确告诉后端查 study
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      myFavoriteIds.value = res.data.data.map(item => item.id)
-    }
-  } catch (error) { }
-}
+const { currentPage, pageSize, totalItems, handleFilterChange, handleSizeChange, handleCurrentChange } = usePagination(() => fetchStudyMaterials())
+const { myFavoriteIds, fetchMyFavorites, handleFavorite } = useFavorites('study')
 const fetchStudyMaterials = async () => {
   try {
     // 👉 [修改] 加入 page 和 limit 参数发送给后端
@@ -167,21 +122,6 @@ const handleDownload = (url) => {
   setTimeout(() => {
     window.open(url, '_blank')
   }, 800)
-}
-const handleFavorite = async (item) => {
-  try {
-    const res = await request.post('/api/favorites/toggle', {
-      target_id: item.id,
-      target_type: 'study' // 👉 关键：告诉后端我这次收藏的是资料
-    })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      ElMessage.success(res.data.message)
-      const nextFavorited = !item.is_favorited
-      item.is_favorited = nextFavorited // 前端秒切状态
-      syncFavoriteIds(item.id, nextFavorited)
-    }
-  } catch (error) { ElMessage.error('操作失败') }
 }
 
 onMounted(async () => {

@@ -66,18 +66,13 @@
 
         <el-empty v-if="resourceList.length === 0" description="暂无该分类资源" />
 
-        <div class="pagination-container" v-if="totalItems > 0">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :page-sizes="[5, 10, 20, 50]"
-            background
-            layout="total, sizes, prev, pager, next, jumper"
-            :total="totalItems"
-            @size-change="handleSizeChange"
-            @current-change="handleCurrentChange"
-          />
-        </div>
+        <PaginationBar
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="totalItems"
+          @current-change="handleCurrentChange"
+          @size-change="handleSizeChange"
+        />
       </el-main>
     </el-container>
   </div>
@@ -89,53 +84,18 @@ import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import NavBar from '../components/NavBar.vue'
+import PaginationBar from '../components/PaginationBar.vue'
+import { usePagination } from '../utils/composables/usePagination'
+import { useFavorites } from '../utils/composables/useFavorites'
 
 const router = useRouter()
 const activeType = ref('') // 当前选中的分类，空字符串代表全部
 const searchQuery = ref('') // 👉 [新增] 声明搜索框绑定的变量
 const resourceList = ref([])
-const myFavoriteIds = ref([])
 const isPageActive = ref(true)
-// 👉 [新增] 1. 分页核心变量
-const currentPage = ref(1)
-const pageSize = ref(10)
-const totalItems = ref(0)
 
-// 👉 [新增] 2. 统筹控制器（切换分类或搜索时归零）
-const handleFilterChange = () => {
-  currentPage.value = 1
-  fetchResources()
-}
-
-// 👉 [新增] 3. 分页器触发的方法
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  currentPage.value = 1
-  fetchResources()
-}
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  fetchResources()
-}
-
-const syncFavoriteIds = (targetId, shouldInclude) => {
-  const ids = new Set(myFavoriteIds.value)
-  if (shouldInclude) {
-    ids.add(targetId)
-  } else {
-    ids.delete(targetId)
-  }
-  myFavoriteIds.value = Array.from(ids)
-}
-
-// 获取当前用户在该模块的收藏 ID 列表
-const fetchMyFavorites = async () => {
-  try {
-    const res = await request.get('/api/user/favorites', { params: { type: 'resource' } })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
-  } catch (error) { }
-}
+const { currentPage, pageSize, totalItems, handleFilterChange, handleSizeChange, handleCurrentChange } = usePagination(() => fetchResources())
+const { myFavoriteIds, fetchMyFavorites, handleFavorite } = useFavorites('resource')
 
 // 获取资源列表的方法，支持传入分类参数
 const fetchResources = async () => {
@@ -173,21 +133,6 @@ const getTagType = (type) => {
     '办公效率': 'success'
   }
   return colorMap[type] || 'info'
-}
-const handleFavorite = async (item) => {
-  try {
-    const res = await request.post('/api/favorites/toggle', {
-      target_id: item.id,
-      target_type: 'resource' // 这里的 type 要和后端对应
-    })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      ElMessage.success(res.data.message)
-      const nextFavorited = !item.is_favorited
-      item.is_favorited = nextFavorited
-      syncFavoriteIds(item.id, nextFavorited)
-    }
-  } catch (error) { ElMessage.error('操作失败') }
 }
 
 // 页面加载时默认获取全部资源

@@ -736,6 +736,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request, { API_BASE_URL } from '../utils/request'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const activeSection = ref('overview')
@@ -1687,8 +1688,7 @@ const handleProcessResetRequest = async (requestItem) => {
 }
 
 const handleLogout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
+  useAuthStore().logout()
   router.push('/login')
 }
 

@@ -68,6 +68,7 @@
 <script setup>
 import { ref, nextTick, watch } from 'vue'
 import request from '../utils/request'
+import { useAuthStore } from '../stores/auth'
 
 const visible = ref(false)
 const inputText = ref('')
@@ -106,8 +107,8 @@ const sendMessage = async () => {
   await scrollToBottom()
 
   try {
-    const token = localStorage.getItem('token')
-    if (!token) {
+    const auth = useAuthStore()
+    if (!auth.isLoggedIn) {
       messages.value.push({ role: 'assistant', content: '❌ 请先登录' })
       streaming.value = false
       return
@@ -117,7 +118,7 @@ const sendMessage = async () => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${auth.token}`
       },
       body: JSON.stringify({ message: text })
     })

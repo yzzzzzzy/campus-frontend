@@ -8,10 +8,10 @@
       <el-main class="main-content">
         <div class="toolbar">
           <div class="filter-group">
-            <el-input v-model="searchQuery" placeholder="搜索帖子标题或正文内容..." clearable class="search-input" @keyup.enter="executeSearch">
-              <template #append><el-button icon="Search" @click="executeSearch" /></template>
+            <el-input v-model="searchQuery" placeholder="搜索帖子标题或正文内容..." clearable class="search-input" @keyup.enter="handleFilterChange">
+              <template #append><el-button icon="Search" @click="handleFilterChange" /></template>
             </el-input>
-            <el-select v-model="selectedCategory" placeholder="全部分类" clearable class="filter-select" @change="executeSearch">
+            <el-select v-model="selectedCategory" placeholder="全部分类" clearable class="filter-select" @change="handleFilterChange">
               <el-option label="全部分类" value="" /> 
               <el-option v-for="cat in categoryList" :key="cat.id" :label="cat.name" :value="cat.id" />
             </el-select>
@@ -86,18 +86,13 @@
         </el-card>
         <el-empty v-if="postList.length === 0" description="没有找到相关帖子" />
 
-        <div class="pagination-container" v-if="totalPosts > 0">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :page-sizes="[5, 10, 20, 50]"
-            background
-            layout="total, sizes, prev, pager, next, jumper"
-            :total="totalPosts"
-            @size-change="handleSizeChange"
-            @current-change="handleCurrentChange"
-          />
-        </div>
+        <PaginationBar
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="totalItems"
+          @current-change="handleCurrentChange"
+          @size-change="handleSizeChange"
+        />
 
         <el-dialog v-model="dialogVisible" title="📝 发布论坛帖子" width="50%">
           <el-form :model="postForm" label-width="80px">
@@ -143,6 +138,9 @@ import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import NavBar from '../components/NavBar.vue'
+import PaginationBar from '../components/PaginationBar.vue'
+import { usePagination } from '../utils/composables/usePagination'
+import { useFavorites } from '../utils/composables/useFavorites'
 
 const router = useRouter()
 const postList = ref([])
@@ -151,35 +149,46 @@ const dialogVisible = ref(false)
 const searchQuery = ref('')
 const selectedCategory = ref('')
 const postForm = ref({ title: '', category_id: '', tags: '', content: '', is_anonymous: false })
-const myFavoriteIds = ref([]) // 用来存当前用户收藏过的帖子 ID
-// 👉 [新增] 分页相关状态
-const currentPage = ref(1)   // 当前页码
-const pageSize = ref(10)     // 每页显示几条
-const totalPosts = ref(0)    // 总帖子数
 const isPageActive = ref(true)
 
-const syncIdList = (idsRef, targetId, shouldInclude) => {
-  const currentIds = new Set(idsRef.value)
-  if (shouldInclude) {
-    currentIds.add(targetId)
-  } else {
-    currentIds.delete(targetId)
-  }
-  idsRef.value = Array.from(currentIds)
+const { currentPage, pageSize, totalItems, handleFilterChange, handleSizeChange, handleCurrentChange } = usePagination(() => fetchPosts())
+const { myFavoriteIds, fetchMyFavorites, handleFavorite } = useFavorites('post')
+
+const myLikedIds = ref([]) // 存用户点过赞的 ID
+
+// 通用的 ID 列表同步工具
+const syncIdList = (listRef, id, shouldInclude) => {
+  const ids = new Set(listRef.value)
+  shouldInclude ? ids.add(id) : ids.delete(id)
+  listRef.value = Array.from(ids)
 }
 
-// 👉 [新增] 获取用户所有的收藏记录 ID
-const fetchMyFavorites = async () => {
+// 获取用户点赞记录
+const fetchMyLikes = async () => {
   try {
-    const res = await request.get('/api/user/favorites')
+    const res = await request.get('/api/user/likes')
+    if (!isPageActive.value) return
+    if (res.data.code === 200) myLikedIds.value = res.data.data
+  } catch (error) {}
+}
+
+// 处理点赞点击
+const handleLike = async (post) => {
+  try {
+    const res = await request.post('/api/likes/toggle', { post_id: post.id })
     if (!isPageActive.value) return
     if (res.data.code === 200) {
-      // 把查到的收藏帖子的 ID 提取出来存进数组
-      myFavoriteIds.value = res.data.data.map(item => item.id)
+      if (res.data.action === 'added') {
+        post.is_liked = true
+        post.likes_count = (post.likes_count || 0) + 1
+        syncIdList(myLikedIds, post.id, true)
+      } else {
+        post.is_liked = false
+        post.likes_count = Math.max(0, (post.likes_count || 1) - 1)
+        syncIdList(myLikedIds, post.id, false)
+      }
     }
-  } catch (error) {
-    console.error('获取收藏列表失败')
-  }
+  } catch (error) { ElMessage.error('点赞失败') }
 }
 
 const fetchPosts = async () => {
@@ -201,7 +210,7 @@ const fetchPosts = async () => {
         is_liked: myLikedIds.value.includes(post.id),
       }))
       // 👉 关键：接收后端传来的总条数，喂给分页器
-      totalPosts.value = res.data.total || 0
+      totalItems.value = res.data.total || 0
       // 与后端规范化分页参数对齐（后端会自动做边界修正）
       currentPage.value = res.data.page || currentPage.value
       pageSize.value = res.data.limit || pageSize.value
@@ -215,25 +224,6 @@ const fetchCategories = async () => {
     if (!isPageActive.value) return
     if (res.data.code === 200) categoryList.value = res.data.data
   } catch (error) { console.error('获取分类失败') }
-}
-
-const executeSearch = () => {
-  // 经典防爆雷：搜索条件变了，必须强行把页码拉回第 1 页！
-  // 否则如果你在第 5 页搜索一个只有 2 条结果的词，就会白屏。
-  currentPage.value = 1 
-  fetchPosts() 
-}
-// 👉 [新增] 切换每页显示条数 (比如从 10条/页 变成 20条/页)
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  currentPage.value = 1 // 改变条数后，为了防止页码越界，重置回第 1 页
-  fetchPosts()
-}
-
-// 👉 [新增] 点击下一页 / 点击具体页码
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  fetchPosts()
 }
 
 const submitPost = async () => {
@@ -292,56 +282,6 @@ const submitComment = async (post) => {
       post.commentsList = commentsRes.data.data
     }
   } catch (error) { ElMessage.error('评论失败') }
-}
-
-// 👉 [新增] 处理收藏逻辑
-const handleFavorite = async (post) => {
-  try {
-    const res = await request.post('/api/favorites/toggle', {
-      target_id: post.id,
-      target_type: 'post'
-    })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      ElMessage.success(res.data.message)
-      // 👉 [重点修改] 手动切换前端状态，让星星立刻变色！
-      const nextFavorited = !post.is_favorited
-      post.is_favorited = nextFavorited
-      syncIdList(myFavoriteIds, post.id, nextFavorited)
-    }
-  } catch (error) {
-    ElMessage.error('操作失败，请检查是否登录')
-  }
-}
-const myLikedIds = ref([]) // 存用户点过赞的 ID
-
-// 👉 [新增] 获取用户点赞记录
-const fetchMyLikes = async () => {
-  try {
-    const res = await request.get('/api/user/likes')
-    if (!isPageActive.value) return
-    if (res.data.code === 200) myLikedIds.value = res.data.data
-  } catch (error) {}
-}
-
-// 👉 [新增] 处理点赞点击
-const handleLike = async (post) => {
-  try {
-    const res = await request.post('/api/likes/toggle', { post_id: post.id })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      // 乐观更新：前端直接修改状态和数字，不刷新网页
-      if (res.data.action === 'added') {
-        post.is_liked = true
-        post.likes_count = (post.likes_count || 0) + 1
-        syncIdList(myLikedIds, post.id, true)
-      } else {
-        post.is_liked = false
-        post.likes_count = Math.max(0, (post.likes_count || 1) - 1)
-        syncIdList(myLikedIds, post.id, false)
-      }
-    }
-  } catch (error) { ElMessage.error('点赞失败') }
 }
 
 onMounted(async () => { // 👉 关键修复：在这里加上 async

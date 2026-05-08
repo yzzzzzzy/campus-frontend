@@ -7,7 +7,7 @@
 
       <el-main class="main-content">
         <div class="filter-bar">
-          <el-radio-group v-model="activeStatus" @change="handleStatusChange">
+          <el-radio-group v-model="activeStatus" @change="handleFilterChange">
             <el-radio-button value="">全部组队</el-radio-button>
             <el-radio-button value="招募中">🔥 招募中</el-radio-button>
             <el-radio-button value="已满员">✅ 已满员</el-radio-button>
@@ -75,18 +75,13 @@
 
         <el-empty v-if="compList.length === 0" description="暂无组队信息" />
 
-        <div class="pagination-container" v-if="totalCompetitions > 0">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :page-sizes="[6, 10, 20, 50]"
-            background
-            layout="total, sizes, prev, pager, next, jumper"
-            :total="totalCompetitions"
-            @size-change="handleSizeChange"
-            @current-change="handleCurrentChange"
-          />
-        </div>
+        <PaginationBar
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="totalItems"
+          @current-change="handleCurrentChange"
+          @size-change="handleSizeChange"
+        />
       </el-main>
 
       <el-dialog v-model="dialogVisible" title="🏆 发布竞赛招募" width="50%">
@@ -124,24 +119,14 @@ import request from '../utils/request'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import NavBar from '../components/NavBar.vue'
+import PaginationBar from '../components/PaginationBar.vue'
+import { usePagination } from '../utils/composables/usePagination'
+import { useFavorites } from '../utils/composables/useFavorites'
 
 const router = useRouter()
 const activeStatus = ref('')
 const compList = ref([])
-const currentPage = ref(1)
-const pageSize = ref(10)
-const totalCompetitions = ref(0)
 const isPageActive = ref(true)
-const syncFavoriteIds = (targetId, shouldInclude) => {
-  const ids = new Set(myFavoriteIds.value)
-  if (shouldInclude) {
-    ids.add(targetId)
-  } else {
-    ids.delete(targetId)
-  }
-  myFavoriteIds.value = Array.from(ids)
-}
-// 👉 [新增] 弹窗可见性与表单数据
 const dialogVisible = ref(false)
 const compForm = ref({
   comp_name: '',
@@ -151,15 +136,8 @@ const compForm = ref({
   description: ''
 })
 
-const myFavoriteIds = ref([])
-
-const fetchMyFavorites = async () => {
-  try {
-    const res = await request.get('/api/user/favorites', { params: { type: 'competition' } })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) myFavoriteIds.value = res.data.data.map(item => item.id)
-  } catch (error) { }
-}
+const { currentPage, pageSize, totalItems, handleFilterChange, handleSizeChange, handleCurrentChange } = usePagination(() => fetchCompetitions())
+const { myFavoriteIds, fetchMyFavorites, handleFavorite } = useFavorites('competition')
 
 const fetchCompetitions = async () => {
   try {
@@ -177,26 +155,11 @@ const fetchCompetitions = async () => {
         ...item,
         is_favorited: myFavoriteIds.value.includes(item.id)
       }))
-      totalCompetitions.value = res.data.total || 0
+      totalItems.value = res.data.total || 0
     }
   } catch (error) { ElMessage.error('获取组队列表失败') }
 }
 
-const handleStatusChange = () => {
-  currentPage.value = 1
-  fetchCompetitions()
-}
-
-const handleSizeChange = (val) => {
-  pageSize.value = val
-  currentPage.value = 1
-  fetchCompetitions()
-}
-
-const handleCurrentChange = (val) => {
-  currentPage.value = val
-  fetchCompetitions()
-}
 // 👉 [新增] 提交竞赛招募的方法
 const submitCompetition = async () => {
   // 防呆校验
@@ -222,7 +185,7 @@ const submitCompetition = async () => {
         if (compList.value.length > pageSize.value) {
           compList.value.pop()
         }
-        totalCompetitions.value += 1
+        totalItems.value += 1
       } else {
         currentPage.value = 1
         await fetchCompetitions()
@@ -237,22 +200,6 @@ const submitCompetition = async () => {
     const msg = error?.response?.data?.message || '发布失败，请检查登录状态'
     ElMessage.error(msg)
   }
-}
-
-const handleFavorite = async (item) => {
-  try {
-    const res = await request.post('/api/favorites/toggle', {
-      target_id: item.id,
-      target_type: 'competition'
-    })
-    if (!isPageActive.value) return
-    if (res.data.code === 200) {
-      ElMessage.success(res.data.message)
-      const nextFavorited = !item.is_favorited
-      item.is_favorited = nextFavorited
-      syncFavoriteIds(item.id, nextFavorited)
-    }
-  } catch (error) { ElMessage.error('操作失败') }
 }
 
 // 点击联系队长：弹出联系方式已由 popover 完成；此处实现发私信跳转逻辑

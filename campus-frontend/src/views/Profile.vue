@@ -182,6 +182,7 @@ import request, { API_BASE_URL } from '../utils/request'
 import NavBar from '../components/NavBar.vue' // 👉 引入通用导航栏组件
 import Messages from './Messages.vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useAuthStore } from '../stores/auth'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -345,8 +346,7 @@ const handleChangePassword = async () => {
       passwordForm.value.currentPassword = ''
       passwordForm.value.newPassword = ''
       passwordForm.value.confirmPassword = ''
-      localStorage.removeItem('token')
-      localStorage.removeItem('user')
+      useAuthStore().logout()
       router.push('/login')
     } else {
       ElMessage.error(res.data.message)
@@ -357,8 +357,7 @@ const handleChangePassword = async () => {
 }
 // 👉 [新增] 退出登录逻辑
 const handleLogout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user')
+  useAuthStore().logout()
   router.push('/login')
 }
 // 👉 [新增] 获取我的收藏
@@ -495,7 +494,7 @@ const handleDeleteAccount = async () => {
     
     if (res.data.code === 200) {
       ElMessage.success('账号已永久注销，期待与您的再次相遇。')
-      localStorage.removeItem('token') // 清除登录凭证
+      useAuthStore().logout()
       router.push('/login')            // 踢回登录页
     }
   } catch (error) {
@@ -506,11 +505,13 @@ const handleDeleteAccount = async () => {
   }
 }
 
-onMounted(() => {
-  fetchUserInfo()
-  fetchMyPosts()
-  fetchMyFavorites()
-  fetchUserStats()
+onMounted(async () => {
+  await Promise.all([
+    fetchUserInfo(),
+    fetchMyPosts(),
+    fetchMyFavorites(),
+    fetchUserStats()
+  ])
   activeTab.value = route.query.tab === 'messages' ? 'messages' : (route.query.tab === 'favorites' ? 'favorites' : 'posts')
 })
 

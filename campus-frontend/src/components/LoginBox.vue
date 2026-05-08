@@ -81,6 +81,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const activeTab = ref('login')
@@ -104,8 +105,8 @@ const handleLogin = async () => {
     const res = await request.post('/api/login', loginForm.value)
     if (res.data.code === 200) {
       ElMessage.success('欢迎回来')
-      localStorage.setItem('token', res.data.data.token)
-      localStorage.setItem('user', JSON.stringify(res.data.data.user))
+      const auth = useAuthStore()
+      auth.setAuth(res.data.data.token, res.data.data.user)
       router.push(Number(res.data.data.user?.role) === 1 ? '/admin' : '/home')
     } else { ElMessage.error(res.data.message) }
   } catch (error) { ElMessage.error('服务器走神了') }

@@ -44,7 +44,7 @@
               <div
                 v-for="item in announcementList"
                 :key="item.id"
-                class="announcement-item"
+                class="announcement-item card"
                 :class="{ unread: item.is_new }"
                 @click.stop="openAnnouncementDetail(item.id)"
               >
@@ -93,7 +93,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import request from '../utils/request'
 import { ElMessage } from 'element-plus'
-import { Bell } from '@element-plus/icons-vue'
+import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 
@@ -188,8 +188,7 @@ const openAnnouncementDetail = async (announcementId) => {
 // 处理下拉菜单的点击事件
 const handleCommand = (command) => {
   if (command === 'logout') {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+    useAuthStore().logout()
     ElMessage.success('已安全退出')
     router.push('/login')
   } else if (command === 'profile') {
@@ -351,22 +350,10 @@ defineExpose({ loadAnnouncements })
 }
 
 .announcement-item {
-  padding: var(--gap-md);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  cursor: pointer;
-  transition: all var(--transition-fast);
   min-height: 128px;
   max-height: 128px;
   display: flex;
   flex-direction: column;
-}
-
-.announcement-item:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-lg);
-  border-color: var(--color-border-light);
 }
 
 .announcement-item.unread {
