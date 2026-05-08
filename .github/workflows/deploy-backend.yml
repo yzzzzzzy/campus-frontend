@@ -36,7 +36,7 @@ jobs:
           # 创建一个专用的临时文件夹
           mkdir -p deploy_tmp
           # 把压缩包生成在临时文件夹里，同时把这个临时文件夹本身排除掉
-          tar -czvf deploy_tmp/backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' --exclude='deploy_tmp' .
+          tar -czvf deploy_tmp/backend.tar.gz --exclude='campus-frontend' --exclude='.git' --exclude='node_modules' --exclude='deploy_tmp' --exclude='.env' .
 
       # ==============================
       # 3. CD 阶段：使用 SCP 将文件投递到腾讯云服务器

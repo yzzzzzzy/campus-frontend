@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs'); // 引入加密工具
 const jwt = require('jsonwebtoken'); // 引入 Token 工具
 require('dotenv').config();
@@ -129,6 +130,131 @@ const toPositiveInt = (value) => {
 const isHttpUrl = (value) => /^https?:\/\//i.test(value);
 const isStrongPassword = (value) => /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,50}$/.test(value);
 const getClientIp = (req) => normalizeString(req.ip || 'unknown');
+
+// ==========================================
+// 🤖 系统配置缓存（数据库优先，.env 兜底）
+// ==========================================
+const systemConfigCache = {
+    ai_provider: process.env.AI_PROVIDER || 'deepseek',
+    ai_api_key: process.env.AI_API_KEY || '',
+    ai_model: process.env.AI_MODEL || '',
+    ai_system_prompt: process.env.AI_SYSTEM_PROMPT || ''
+};
+
+const AI_PROVIDER_CONFIGS = {
+    deepseek: {
+        baseURL: 'https://api.deepseek.com/v1/chat/completions',
+        defaultModel: 'deepseek-chat',
+        buildHeaders: (key) => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` })
+    },
+    mimo: {
+        baseURL: 'https://api.xiaomimimo.com/v1/chat/completions',
+        defaultModel: 'mimo-chat',
+        buildHeaders: (key) => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` })
+    }
+};
+
+const getAiConfig = () => {
+    const provider = systemConfigCache.ai_provider || 'deepseek';
+    const providerConfig = AI_PROVIDER_CONFIGS[provider] || AI_PROVIDER_CONFIGS.deepseek;
+    return {
+        provider,
+        baseURL: providerConfig.baseURL,
+        apiKey: systemConfigCache.ai_api_key || process.env.AI_API_KEY || '',
+        model: systemConfigCache.ai_model || providerConfig.defaultModel,
+        systemPrompt: systemConfigCache.ai_system_prompt
+            || process.env.AI_SYSTEM_PROMPT
+            || '你是校园信息平台的AI助手"小c"，请用简洁友好的语气帮助同学。',
+        buildHeaders: providerConfig.buildHeaders
+    };
+};
+
+// 掩码 Key：只显示前2位+后4位
+const maskApiKey = (key) => {
+    if (!key || key.length <= 6) return key || '';
+    return key.slice(0, 2) + '*'.repeat(Math.min(8, key.length - 6)) + key.slice(-4);
+};
+
+// ==========================================
+// 🔐 数据库 Key 加密（AES-256-GCM）
+// ==========================================
+const CONFIG_ENCRYPT_KEY = process.env.CONFIG_ENCRYPT_KEY || (
+    process.env.JWT_SECRET ? crypto.createHash('sha256').update(process.env.JWT_SECRET).digest('hex').slice(0, 32) : null
+);
+
+const ENCRYPTED_FIELDS = ['ai_api_key']; // 需要加密存储的字段
+
+const getEncryptKey = () => {
+    if (!CONFIG_ENCRYPT_KEY) return null;
+    return Buffer.from(CONFIG_ENCRYPT_KEY.slice(0, 32).padEnd(32, '0'), 'utf8');
+};
+
+const encryptConfigValue = (plainText) => {
+    if (!plainText) return '';
+    const key = getEncryptKey();
+    if (!key) return plainText; // 无密钥则明文存储
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = cipher.update(plainText, 'utf8', 'hex');
+    encrypted += cipher.final('hex');
+    const authTag = cipher.getAuthTag().toString('hex');
+    return `${iv.toString('hex')}:${authTag}:${encrypted}`;
+};
+
+const decryptConfigValue = (cipherText) => {
+    if (!cipherText || !cipherText.includes(':')) return cipherText || ''; // 旧数据/空值直接返回
+    const key = getEncryptKey();
+    if (!key) return cipherText;
+    try {
+        const [ivHex, authTagHex, encrypted] = cipherText.split(':');
+        const iv = Buffer.from(ivHex, 'hex');
+        const authTag = Buffer.from(authTagHex, 'hex');
+        const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(authTag);
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch {
+        return cipherText; // 解密失败返回原文（兼容旧未加密数据）
+    }
+};
+
+// 启动时从数据库加载配置；之后每 60 秒自动刷新
+const loadSystemConfigFromDb = async () => {
+    try {
+        const [rows] = await db.query('SELECT config_key, config_value FROM system_config');
+        for (const row of rows) {
+            if (systemConfigCache.hasOwnProperty(row.config_key)) {
+                let value = row.config_value || '';
+                if (ENCRYPTED_FIELDS.includes(row.config_key) && value) {
+                    value = decryptConfigValue(value);
+                }
+                systemConfigCache[row.config_key] = value;
+            }
+        }
+        console.log('📋 系统配置已从数据库加载');
+    } catch (error) {
+        if (!error.message?.includes('system_config')) {
+            console.warn('加载系统配置失败:', error.message);
+        }
+    }
+};
+
+// 确保 system_config 表存在
+const ensureSystemConfigTable = async () => {
+    try {
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS system_config (
+                config_key VARCHAR(64) PRIMARY KEY,
+                config_value TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        `);
+        console.log('✅ system_config 表已就绪');
+    } catch (error) {
+        console.warn('创建 system_config 表失败:', error.message);
+    }
+};
 
 const getRecentAttemptState = (store, key, windowMs, now = Date.now()) => {
     const history = store.get(key) || [];
@@ -2944,9 +3070,14 @@ const startServer = async () => {
         await ensurePostsAnonymousColumn();
         await ensureMessagesTables();
         await ensureAnnouncementTables();
+        await ensureSystemConfigTable();
+        await loadSystemConfigFromDb();
     } catch (error) {
         console.warn('自动检查数据库表结构失败，继续启动服务:', error.message);
     }
+
+    // 每 60 秒刷新系统配置
+    setInterval(loadSystemConfigFromDb, 60 * 1000);
 
     // 👉 [新增] 信息流聚合接口
     // 1. 最新资讯流（分页，每页20条，可一直浏览）
@@ -3087,7 +3218,250 @@ const startServer = async () => {
         }
     });
 
-    const PORT = process.env.PORT || 3000;
+    // ==========================================
+    // 🤖 AI 助手聊天接口（SSE 流式转发）
+    // ==========================================
+    const chatRateLimiter = new Map();
+    const CHAT_RATE_LIMIT_MS = 3000;
+
+    app.post('/api/ai/chat', authenticateToken, async (req, res) => {
+        try {
+            const { message } = req.body;
+            if (!message || typeof message !== 'string' || message.trim().length === 0) {
+                return res.status(400).send({ code: 400, message: '消息不能为空' });
+            }
+            if (message.trim().length > 2000) {
+                return res.status(400).send({ code: 400, message: '消息过长，请控制在2000字以内' });
+            }
+
+            // 频率限制
+            const userId = req.user.id;
+            const now = Date.now();
+            const lastCall = chatRateLimiter.get(userId) || 0;
+            if (now - lastCall < CHAT_RATE_LIMIT_MS) {
+                return res.status(429).send({ code: 429, message: '提问太快了，休息几秒再问吧' });
+            }
+            chatRateLimiter.set(userId, now);
+
+            const aiConfig = getAiConfig();
+            if (!aiConfig.apiKey) {
+                return res.status(500).send({ code: 500, message: 'AI 服务未配置，请联系管理员' });
+            }
+
+            const messages = [];
+            if (aiConfig.systemPrompt) {
+                messages.push({ role: 'system', content: aiConfig.systemPrompt });
+            }
+            messages.push({ role: 'user', content: message.trim() });
+
+            // ========== RAG 检索增强：搜索平台相关内容 ==========
+            const userMsg = message.trim();
+            const searchTerms = userMsg.replace(/[?？,，。！!；;、\s]+/g, ' ').trim().split(' ').filter(t => t.length > 1).slice(0, 5);
+            let ragContext = '';
+            if (searchTerms.length > 0) {
+                const likeClauses = searchTerms.map(() => '(title LIKE ? OR content LIKE ? OR description LIKE ?)').join(' OR ');
+                const likeParams = [];
+                searchTerms.forEach(t => { likeParams.push(`%${t}%`, `%${t}%`, `%${t}%`); });
+
+                try {
+                    const [ragResults] = await db.query(
+                        `SELECT title, description, type, 'resource' AS source FROM resources WHERE ${likeClauses} LIMIT 5
+                         UNION ALL SELECT title, description, category, 'study' AS source FROM study_materials WHERE ${likeClauses} LIMIT 5
+                         UNION ALL SELECT title, content, type, 'career' AS source FROM careers WHERE ${likeClauses} LIMIT 5
+                         UNION ALL SELECT title, description, comp_name, 'competition' AS source FROM competitions WHERE ${likeClauses} LIMIT 5`,
+                        [...likeParams, ...likeParams, ...likeParams, ...likeParams]
+                    );
+                    if (ragResults.length > 0) {
+                        ragContext = '\n\n【平台现有相关资源（供你参考回答）】\n';
+                        const sourceNames = { resource: '个人提升', study: '升学考公', career: '实习就业', competition: '竞赛组队' };
+                        ragResults.forEach((r, i) => {
+                            ragContext += `${i + 1}. [${sourceNames[r.source] || r.source}] ${r.title}：${(r.description || r.content || '').slice(0, 80)}\n`;
+                        });
+                    }
+                } catch (e) { /* RAG 搜索失败不影响对话 */ }
+            }
+            if (ragContext) {
+                messages[0].content += ragContext;
+            }
+            // ========== RAG END ==========
+
+            // 设置 SSE 响应头
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.flushHeaders();
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            try {
+                const aiResponse = await fetch(aiConfig.baseURL, {
+                    method: 'POST',
+                    headers: aiConfig.buildHeaders(aiConfig.apiKey),
+                    body: JSON.stringify({
+                        model: aiConfig.model,
+                        messages,
+                        stream: true,
+                        temperature: 0.7,
+                        max_tokens: 800
+                    }),
+                    signal: controller.signal
+                });
+
+                clearTimeout(timeoutId);
+
+                if (!aiResponse.ok) {
+                    const errText = await aiResponse.text().catch(() => '');
+                    console.error('AI API 错误:', aiResponse.status);
+                    if (!res.headersSent) return;
+                    res.write(`data: ${JSON.stringify({ error: 'AI 服务暂时不可用' })}\n\n`);
+                    res.write('data: [DONE]\n\n');
+                    res.end();
+                    return;
+                }
+
+                const reader = aiResponse.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data === '[DONE]') {
+                                res.write('data: [DONE]\n\n');
+                            } else {
+                                try {
+                                    const parsed = JSON.parse(data);
+                                    const content = parsed.choices?.[0]?.delta?.content;
+                                    if (content) {
+                                        res.write(`data: ${JSON.stringify({ content })}\n\n`);
+                                    }
+                                } catch { /* 跳过解析失败的行 */ }
+                            }
+                        }
+                    }
+                }
+            } catch (fetchError) {
+                clearTimeout(timeoutId);
+                if (fetchError.name === 'AbortError') {
+                    res.write(`data: ${JSON.stringify({ error: 'AI 响应超时' })}\n\n`);
+                }
+            }
+            res.write('data: [DONE]\n\n');
+            res.end();
+        } catch (error) {
+            console.error('AI 接口错误:', error);
+            if (!res.headersSent) {
+                res.status(500).send({ code: 500, message: 'AI 服务异常' });
+            }
+        }
+    });
+
+    // ==========================================
+    // 🔧 管理员系统配置接口（Key 掩码返回）
+    // ==========================================
+    app.get('/api/admin/config', isAdmin, async (req, res) => {
+        try {
+            const config = getAiConfig();
+            res.send({
+                code: 200,
+                data: {
+                    ai_provider: config.provider,
+                    ai_api_key: maskApiKey(config.apiKey),
+                    ai_model: config.model || AI_PROVIDER_CONFIGS[config.provider]?.defaultModel || '',
+                    ai_system_prompt: config.systemPrompt
+                }
+            });
+        } catch (error) {
+            console.error('读取系统配置失败:', error);
+            res.status(500).send({ code: 500, message: '读取配置失败' });
+        }
+    });
+
+    app.put('/api/admin/config', isAdmin, async (req, res) => {
+        try {
+            const { ai_provider, ai_api_key, ai_model, ai_system_prompt } = req.body || {};
+            const updates = [];
+
+            if (ai_provider !== undefined && AI_PROVIDER_CONFIGS[ai_provider]) {
+                updates.push({ key: 'ai_provider', value: ai_provider });
+            }
+            if (ai_api_key !== undefined && ai_api_key !== null && !ai_api_key.includes('***') && ai_api_key.trim() !== '') {
+                updates.push({ key: 'ai_api_key', value: encryptConfigValue(ai_api_key.trim()) });
+            }
+            if (ai_model !== undefined && ai_model !== null && ai_model.trim() !== '') {
+                updates.push({ key: 'ai_model', value: ai_model.trim() });
+            }
+            if (ai_system_prompt !== undefined && ai_system_prompt !== null) {
+                updates.push({ key: 'ai_system_prompt', value: ai_system_prompt.trim() });
+            }
+
+            if (updates.length === 0) {
+                return res.send({ code: 200, message: '没有需要更新的配置' });
+            }
+
+            const values = [];
+            const placeholders = [];
+            for (const u of updates) {
+                placeholders.push('(?, ?)');
+                values.push(u.key, u.value);
+            }
+            await db.query(
+                `INSERT INTO system_config (config_key, config_value) VALUES ${placeholders.join(', ')}
+                 ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)`,
+                values
+            );
+
+            // 立即刷新内存缓存
+            await loadSystemConfigFromDb();
+
+            res.send({ code: 200, message: '配置已更新并生效' });
+        } catch (error) {
+            console.error('更新系统配置失败:', error);
+            res.status(500).send({ code: 500, message: '更新配置失败' });
+        }
+    });
+
+    // 🔍 测试 AI 连接
+    app.post('/api/admin/config/test-ai', isAdmin, async (req, res) => {
+        try {
+            const { ai_provider, ai_api_key, ai_model } = req.body || {};
+            const provider = ai_provider || systemConfigCache.ai_provider || 'deepseek';
+            const providerConfig = AI_PROVIDER_CONFIGS[provider] || AI_PROVIDER_CONFIGS.deepseek;
+            const key = (ai_api_key && ai_api_key.trim() && !ai_api_key.includes('***'))
+                ? ai_api_key.trim() : systemConfigCache.ai_api_key || process.env.AI_API_KEY;
+            if (!key) return res.status(400).send({ code: 400, message: '未配置 API Key' });
+
+            const model = ai_model || systemConfigCache.ai_model || providerConfig.defaultModel;
+            const controller = new AbortController();
+            setTimeout(() => controller.abort(), 15000);
+
+            const aiResponse = await fetch(providerConfig.baseURL, {
+                method: 'POST', headers: providerConfig.buildHeaders(key),
+                body: JSON.stringify({
+                    model, stream: false, max_tokens: 50,
+                    messages: [{ role: 'user', content: '你好，请用一句话介绍你自己' }]
+                }), signal: controller.signal
+            });
+            if (!aiResponse.ok) {
+                const txt = await aiResponse.text().catch(() => '');
+                return res.send({ code: 400, message: 'API 返回 ' + aiResponse.status + (txt ? ': ' + txt.slice(0, 200) : '') });
+            }
+            const result = await aiResponse.json();
+            res.send({ code: 200, message: '连接成功', data: { reply: result.choices?.[0]?.message?.content || '(无内容)', model: result.model || model } });
+        } catch (error) {
+            res.send({ code: 400, message: error.name === 'AbortError' ? '连接超时（15秒）' : (error.message || '连接失败') });
+        }
+    });
+
     app.listen(PORT, () => {
         console.log(`----------------------------------------`);
         console.log(`🚀 后端服务已启动!`);

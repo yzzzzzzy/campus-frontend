@@ -45,6 +45,10 @@
             <el-icon><Bell /></el-icon>
             <span>公告管理</span>
           </el-menu-item>
+          <el-menu-item index="settings">
+            <el-icon><Setting /></el-icon>
+            <span>系统设置</span>
+          </el-menu-item>
         </el-menu>
 
         <div class="aside-footer">
@@ -554,6 +558,86 @@
             </el-card>
           </section>
 
+          <section v-else-if="activeSection === 'settings'" class="table-section">
+            <el-card class="panel-card" shadow="never">
+              <template #header>
+                <div class="panel-header">
+                  <span>AI 助手配置</span>
+                  <el-tag type="warning" effect="plain">修改后立即生效</el-tag>
+                </div>
+              </template>
+
+              <el-alert
+                title="API Key 仅保存在服务器，前端不显示完整密钥，确保安全"
+                type="info"
+                :closable="false"
+                show-icon
+                style="margin-bottom: 16px;"
+              />
+
+              <el-form :model="aiConfigForm" label-position="top" class="publish-form-grid" v-loading="aiConfigLoading">
+                <el-form-item label="AI 提供商">
+                  <el-select v-model="aiConfigForm.ai_provider" placeholder="请选择">
+                    <el-option label="DeepSeek" value="deepseek" />
+                    <el-option label="小米 Mimo" value="mimo" />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="模型名称（可选，留空使用默认）">
+                  <el-input v-model="aiConfigForm.ai_model" placeholder="例如 deepseek-chat / mimo-chat" maxlength="100" />
+                </el-form-item>
+                <el-form-item label="API Key" class="full-width">
+                  <el-input
+                    v-model="aiConfigForm.ai_api_key"
+                    type="password"
+                    show-password
+                    placeholder="留空表示不修改"
+                    maxlength="200"
+                  >
+                    <template #prepend>Key</template>
+                  </el-input>
+                </el-form-item>
+                <el-form-item label="系统提示词（可选，定义 AI 角色）" class="full-width">
+                  <el-input
+                    v-model="aiConfigForm.ai_system_prompt"
+                    type="textarea"
+                    :rows="3"
+                    maxlength="500"
+                    show-word-limit
+                    placeholder="你是校园信息平台的AI助手…"
+                  />
+                </el-form-item>
+                <el-form-item class="full-width">
+                  <el-button type="primary" @click="saveAiConfig" :loading="aiConfigSaving">
+                    保存配置
+                  </el-button>
+                  <el-button @click="loadAiConfig" :loading="aiConfigLoading">
+                    重新加载
+                  </el-button>
+                  <el-button
+                    type="success"
+                    @click="testAiConfig"
+                    :loading="aiConfigTesting"
+                    :disabled="!aiConfigForm.ai_api_key.trim() && !aiConfigSavedKey"
+                  >
+                    <el-icon><Connection /></el-icon>
+                    测试连接
+                  </el-button>
+                </el-form-item>
+                <!-- 测试结果提示 -->
+                <el-form-item v-if="aiTestResult" class="full-width">
+                  <el-alert
+                    :title="aiTestResult.title"
+                    :description="aiTestResult.description"
+                    :type="aiTestResult.success ? 'success' : 'error'"
+                    :closable="true"
+                    show-icon
+                    @close="aiTestResult = null"
+                  />
+                </el-form-item>
+              </el-form>
+            </el-card>
+          </section>
+
           <!-- 公告编辑弹窗 -->
           <el-dialog
             v-model="announcementEditDialogVisible"
@@ -640,6 +724,7 @@
               <el-button type="danger" :loading="createAdminLoading" @click="handleCreateAdmin">确认创建</el-button>
             </template>
           </el-dialog>
+
         </el-main>
       </el-container>
     </el-container>
@@ -767,6 +852,104 @@ const createAdminForm = reactive({
   confirmText: ''
 })
 
+// ---- AI 系统设置 ----
+const aiConfigForm = reactive({
+  ai_provider: 'deepseek',
+  ai_api_key: '',
+  ai_model: '',
+  ai_system_prompt: ''
+})
+const aiConfigLoading = ref(false)
+const aiConfigSaving = ref(false)
+
+// ---- 测试连接 ----
+const aiConfigTesting = ref(false)
+const aiTestResult = ref(null)
+const aiConfigSavedKey = ref('')
+
+const loadAiConfig = async () => {
+  aiConfigLoading.value = true
+  try {
+    const res = await request.get('/api/admin/config')
+    if (res.data.code === 200) {
+      const d = res.data.data
+      aiConfigForm.ai_provider = d.ai_provider || 'deepseek'
+      aiConfigForm.ai_api_key = d.ai_api_key || ''
+      aiConfigSavedKey.value = d.ai_api_key || ''
+      aiConfigForm.ai_model = d.ai_model || ''
+      aiConfigForm.ai_system_prompt = d.ai_system_prompt || ''
+    }
+  } catch (error) {
+    ElMessage.error('加载配置失败')
+  } finally {
+    aiConfigLoading.value = false
+  }
+}
+
+const saveAiConfig = async () => {
+  aiConfigSaving.value = true
+  try {
+    const res = await request.put('/api/admin/config', {
+      ai_provider: aiConfigForm.ai_provider,
+      ai_api_key: aiConfigForm.ai_api_key || undefined,
+      ai_model: aiConfigForm.ai_model || undefined,
+      ai_system_prompt: aiConfigForm.ai_system_prompt || undefined
+    })
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.message || '配置已保存')
+      await loadAiConfig()
+    } else {
+      ElMessage.error(res.data.message || '保存失败')
+    }
+  } catch (error) {
+    ElMessage.error('保存配置失败')
+  } finally {
+    aiConfigSaving.value = false
+  }
+}
+
+const testAiConfig = async () => {
+  aiConfigTesting.value = true
+  aiTestResult.value = null
+  const startTime = Date.now()
+  try {
+    const res = await request.post('/api/admin/config/test-ai', {
+      ai_provider: aiConfigForm.ai_provider,
+      ai_api_key: aiConfigForm.ai_api_key || undefined,
+      ai_model: aiConfigForm.ai_model || undefined
+    })
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2)
+    if (res.data.code === 200) {
+      aiTestResult.value = {
+        success: true,
+        title: `✅ 连接成功（耗时 ${elapsed}s）`,
+        description: `AI 回复：${res.data.data?.reply || '(空)'}`
+      }
+    } else {
+      aiTestResult.value = {
+        success: false,
+        title: `❌ 连接失败（耗时 ${elapsed}s）`,
+        description: res.data.message || '未知错误'
+      }
+    }
+  } catch (error) {
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2)
+    aiTestResult.value = {
+      success: false,
+      title: `❌ 连接失败（耗时 ${elapsed}s）`,
+      description: error?.response?.data?.message || error?.message || '网络异常'
+    }
+  } finally {
+    aiConfigTesting.value = false
+  }
+}
+
+watch(() => activeSection.value, (val) => {
+  if (val === 'settings') {
+    loadAiConfig()
+  }
+})
+
 const uploadHeaders = computed(() => ({
   Authorization: `Bearer ${localStorage.getItem('token') || ''}`
 }))
@@ -778,7 +961,8 @@ const sectionTitle = computed(() => {
     posts: '内容审核',
     resetRequests: '密码申诉',
     publish: '内容发布',
-    announcements: '公告管理'
+    announcements: '公告管理',
+    settings: '系统设置'
   }
   return mapping[activeSection.value] || '管理员后台'
 })
