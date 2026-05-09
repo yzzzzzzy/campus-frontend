@@ -109,7 +109,10 @@ const handleLogin = async () => {
       auth.setAuth(res.data.data.token, res.data.data.user)
       router.push(Number(res.data.data.user?.role) === 1 ? '/admin' : '/home')
     } else { ElMessage.error(res.data.message) }
-  } catch (error) { ElMessage.error('服务器走神了') }
+  } catch (error) {
+    // 优先读取后端返回的消息（如限流提示），网络断连才兜底
+    ElMessage.error(error?.response?.data?.message || '服务器走神了')
+  }
   finally { loading.value = false }
 }
 

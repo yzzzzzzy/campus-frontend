@@ -2,7 +2,8 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const normalizeBaseUrl = (url) => (url || '').replace(/\/+$/, '')
-export const API_BASE_URL = normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000')
+// 生产环境使用相对路径，由 Nginx 统一代理到后端；本地开发可通过 .env.development 指定完整地址
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 const request = axios.create({
     baseURL: API_BASE_URL,
@@ -84,9 +85,13 @@ request.interceptors.response.use(
             return Promise.reject(error)
         }
 
-        if (!error?.response) {
-            showGlobalError('网络连接异常，请检查网络后重试')
+        // 其他可识别的业务错误（如 429 限流），透传原始消息给调用方处理
+        if (error?.response) {
+            return Promise.reject(error)
         }
+
+        // 完全无响应的网络错误
+        showGlobalError('网络连接异常，请检查网络后重试')
 
         return Promise.reject(error)
     }

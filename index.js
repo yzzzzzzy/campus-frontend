@@ -662,9 +662,13 @@ app.post('/api/login', async (req, res) => {
 
         // 1. 去数据库里找这个账号
         const [users] = await db.query('SELECT * FROM users WHERE username = ?', [normalizedUsername]);
+
+        // 防用户枚举：无论账号是否存在，均记录失败并返回统一错误消息
         if (users.length === 0) {
+            // 使用固定哈希做一次无效比对以消除时间侧信道差异
+            bcrypt.compareSync(normalizedPassword, '$2a$10$placeholderhashforconstanttimecomparisonxxxx');
             recordLoginFailure(normalizedUsername, clientIp, rateLimitState.now);
-            return res.send({ code: 400, message: '账号不存在！' });
+            return res.send({ code: 400, message: '账号或密码错误' });
         }
 
         const user = users[0];
@@ -677,7 +681,7 @@ app.post('/api/login', async (req, res) => {
         const isPasswordValid = bcrypt.compareSync(normalizedPassword, user.password);
         if (!isPasswordValid) {
             recordLoginFailure(normalizedUsername, clientIp, rateLimitState.now);
-            return res.send({ code: 400, message: '密码错误！' });
+            return res.send({ code: 400, message: '账号或密码错误' });
         }
 
         clearLoginFailures(normalizedUsername, clientIp);
@@ -769,6 +773,7 @@ app.post('/api/password-reset-requests/verify-user', async (req, res) => {
     try {
         const { username } = req.body;
         const normalizedUsername = normalizeString(username);
+        const clientIp = normalizeString(req.ip || 'unknown');
 
         if (!normalizedUsername) {
             return res.send({ code: 400, message: '账号不能为空' });
@@ -776,6 +781,15 @@ app.post('/api/password-reset-requests/verify-user', async (req, res) => {
         if (normalizedUsername.length > 50) {
             return res.send({ code: 400, message: '账号长度不能超过50个字符' });
         }
+
+        // 限流保护：同IP 60秒内最多校验3次，防止批量枚举
+        const now = Date.now();
+        const ipHistory = passwordResetRequestIpLimiter.get(clientIp) || [];
+        const validIpHistory = ipHistory.filter(timestamp => now - timestamp <= PASSWORD_RESET_REQUEST_WINDOW_MS);
+        if (validIpHistory.length >= PASSWORD_RESET_REQUEST_IP_MAX) {
+            return res.status(429).send({ code: 429, message: '校验过于频繁，请1分钟后再试' });
+        }
+        passwordResetRequestIpLimiter.set(clientIp, [...validIpHistory, now]);
 
         const [users] = await db.query('SELECT id, username, nickname FROM users WHERE username = ? LIMIT 1', [normalizedUsername]);
         if (users.length === 0) {
