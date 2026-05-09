@@ -3266,7 +3266,6 @@ const startServer = async () => {
             if (aiConfig.systemPrompt) {
                 messages.push({ role: 'system', content: aiConfig.systemPrompt });
             }
-            messages.push({ role: 'user', content: message.trim() });
 
             // ========== RAG 检索增强：搜索平台相关内容 ==========
             const userMsg = message.trim();
@@ -3286,18 +3285,22 @@ const startServer = async () => {
                         [...likeParams, ...likeParams, ...likeParams, ...likeParams]
                     );
                     if (ragResults.length > 0) {
-                        ragContext = '\n\n【平台现有相关资源（供你参考回答）】\n';
+                        ragContext = '【平台现有相关资源——以下是从数据库查询的真实数据，你的回答必须基于此，不得编造】\n';
                         const sourceNames = { resource: '个人提升', study: '升学考公', career: '实习就业', competition: '竞赛组队' };
                         ragResults.forEach((r, i) => {
                             ragContext += `${i + 1}. [${sourceNames[r.source] || r.source}] ${r.title}：${(r.description || r.content || '').slice(0, 80)}\n`;
                         });
+                        ragContext += '\n⚠️ 再次提醒：只引用以上真实存在的资源，不要编造任何不存在的标题或描述。';
                     }
                 } catch (e) { /* RAG 搜索失败不影响对话 */ }
             }
             if (ragContext) {
-                messages[0].content += ragContext;
+                // 作为独立系统消息注入，让 AI 明确区分"指令"和"参考数据"
+                messages.push({ role: 'system', content: ragContext });
             }
             // ========== RAG END ==========
+
+            messages.push({ role: 'user', content: message.trim() });
 
             // 设置 SSE 响应头
             res.setHeader('Content-Type', 'text/event-stream');

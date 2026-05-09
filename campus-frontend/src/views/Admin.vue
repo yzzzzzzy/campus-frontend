@@ -600,8 +600,8 @@
                   <el-input
                     v-model="aiConfigForm.ai_system_prompt"
                     type="textarea"
-                    :rows="3"
-                    maxlength="500"
+                    :rows="6"
+                    maxlength="1500"
                     show-word-limit
                     placeholder="你是校园信息平台的AI助手…"
                   />
