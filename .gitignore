@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# 数据库文件
+*.sql
+database/
