@@ -67,8 +67,9 @@
 
 <script setup>
 import { ref, nextTick, watch } from 'vue'
-import request from '../utils/request'
 import { useAuthStore } from '../stores/auth'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 const visible = ref(false)
 const inputText = ref('')
@@ -83,7 +84,13 @@ const toggleChat = () => {
 
 const renderMarkdown = (text) => {
   if (!text) return ''
-  return text
+  // 先转义 HTML，防止 XSS 注入
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+  return escaped
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\n/g, '<br>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
@@ -114,7 +121,7 @@ const sendMessage = async () => {
       return
     }
 
-    const response = await fetch(`${request.defaults.baseURL}/api/ai/chat`, {
+    const response = await fetch(`${API_BASE}/api/ai/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

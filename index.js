@@ -78,6 +78,17 @@ const ALLOWED_ADMIN_UPLOAD_MIME_TYPES = [
 const ALLOWED_ADMIN_UPLOAD_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.rar', '.7z'];
 const tableColumnsCache = new Map();
 
+// 🤖 AI 对话用中文停用词（RAG 搜索时过滤，避免无意义词制造噪音）
+const AI_STOP_WORDS = new Set([
+    '的', '了', '是', '我', '你', '他', '她', '它', '们', '这', '那', '什么',
+    '怎么', '怎样', '哪', '吗', '吧', '呢', '啊', '哦', '嗯', '哈', '呀', '喂',
+    '和', '与', '或', '但', '而', '及', '在', '有', '不', '被', '把', '让', '给',
+    '要', '会', '能', '可以', '应该', '需要', '想', '说', '看', '知道', '告诉',
+    '一个', '一些', '这个', '那个', '哪个', '为什么', '因为', '所以',
+    '如果', '虽然', '但是', '然后', '之后', '之前', '现在', '今天', '明天',
+    '一下', '有没有', '是否', '如何', '请问', '帮忙', '谢谢', '你好', '哈喽'
+]);
+
 const sendApiError = (res, status = 500, message, extra = {}) => {
     return res.status(status).send({
         code: status,
@@ -3269,7 +3280,9 @@ const startServer = async () => {
 
             // ========== RAG 检索增强：搜索平台相关内容 ==========
             const userMsg = message.trim();
-            const searchTerms = userMsg.replace(/[?？,，。！!；;、\s]+/g, ' ').trim().split(' ').filter(t => t.length > 1).slice(0, 5);
+            // 拆词 + 过滤停用词 + 只保留长度≥2的有效词
+            const rawTerms = userMsg.replace(/[?？,，。！!；;、\s]+/g, ' ').trim().split(' ').filter(t => t.length >= 2);
+            const searchTerms = rawTerms.filter(t => !AI_STOP_WORDS.has(t)).slice(0, 3);
             let ragContext = '';
             if (searchTerms.length > 0) {
                 const likeClauses = searchTerms.map(() => '(title LIKE ? OR content LIKE ? OR description LIKE ?)').join(' OR ');
@@ -3285,18 +3298,27 @@ const startServer = async () => {
                         [...likeParams, ...likeParams, ...likeParams, ...likeParams]
                     );
                     if (ragResults.length > 0) {
-                        ragContext = '【平台现有相关资源——以下是从数据库查询的真实数据，你的回答必须基于此，不得编造】\n';
+                        ragContext = '【以下是从数据库查到的平台资源，仅供参考。'
+                            + '如果这些资源确实与用户问题相关，可以引用；如果不相关，请直接忽略，用自己的知识回答。'
+                            + '绝对不要编造不存在的资源标题或描述。】\n';
                         const sourceNames = { resource: '个人提升', study: '升学考公', career: '实习就业', competition: '竞赛组队' };
                         ragResults.forEach((r, i) => {
                             ragContext += `${i + 1}. [${sourceNames[r.source] || r.source}] ${r.title}：${(r.description || r.content || '').slice(0, 80)}\n`;
                         });
-                        ragContext += '\n⚠️ 再次提醒：只引用以上真实存在的资源，不要编造任何不存在的标题或描述。';
                     }
                 } catch (e) { /* RAG 搜索失败不影响对话 */ }
             }
             if (ragContext) {
                 // 作为独立系统消息注入，让 AI 明确区分"指令"和"参考数据"
                 messages.push({ role: 'system', content: ragContext });
+            } else if (searchTerms.length > 0) {
+                // 搜了但没结果，告知 AI 如实说，不要编造
+                messages.push({
+                    role: 'system',
+                    content: '注意：系统已在数据库中搜索过，没有找到与用户问题匹配的资源。'
+                        + '请如实告知用户"目前平台上还没有这方面的内容"，然后可以根据自身知识给出通用建议。'
+                        + '绝对不要编造任何资源名称或标题。'
+                });
             }
             // ========== RAG END ==========
 
